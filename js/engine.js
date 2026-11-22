@@ -25,7 +25,7 @@ window.STARUP_ENGINE = (() => {
   let saveDotTimer = null;
   let lastOverlaySig = '';
   let lastDrawerMoney = null;
-  let exactMoneyMode = false;
+  let moneyDisplayMode = 'auto'; // 'auto' | 'exact' | 'compact'
   let autoSaveAccum = 0;
 
   const CLIENT_SLOTS = [
@@ -96,8 +96,36 @@ window.STARUP_ENGINE = (() => {
   }
 
   // ==================== SAVE / LOAD / RECOVERY CODE ====================
+  function compactStateForSave(st) {
+    // Strip bulky history/log tails while keeping 100% of game progress & exact state
+    const clone = JSON.parse(JSON.stringify(st));
+    clone.minutes = Math.round((clone.minutes || 474) * 10) / 10;
+    clone.happyHourLeft = Math.round((clone.happyHourLeft || 0) * 10) / 10;
+    clone.happyHourCooldown = Math.round((clone.happyHourCooldown || 0) * 10) / 10;
+    if (Array.isArray(clone.stocks)) {
+      clone.stocks = clone.stocks.map(x => ({
+        symbol: x.symbol, name: x.name, price: x.price, prevPrice: x.prevPrice,
+        volatility: x.volatility, color: x.color, shares: x.shares || 0,
+        avgCost: Math.round((x.avgCost || 0) * 100) / 100, nextBias: x.nextBias || 0,
+        isOwn: !!x.isOwn, history: (x.history || []).slice(-4)
+      }));
+    }
+    if (Array.isArray(clone.newsList)) clone.newsList = clone.newsList.slice(0, 4);
+    if (Array.isArray(clone.dailyCompletedJobs)) clone.dailyCompletedJobs = clone.dailyCompletedJobs.slice(0, 6);
+    if (clone.rooms) {
+      Object.keys(clone.rooms).forEach(k => {
+        const j = clone.rooms[k] && clone.rooms[k].job;
+        if (j) j.progress = Math.round((j.progress || 0) * 10) / 10;
+      });
+    }
+    return clone;
+  }
+
   function encodeSaveCode(st) {
-    try { return 'STARUP-' + btoa(unescape(encodeURIComponent(JSON.stringify(st)))); } catch (e) { return ''; }
+    try {
+      const compact = compactStateForSave(st);
+      return 'STARUP-' + btoa(unescape(encodeURIComponent(JSON.stringify(compact))));
+    } catch (e) { return ''; }
   }
   function decodeSaveCode(code) {
     try {
@@ -116,6 +144,12 @@ window.STARUP_ENGINE = (() => {
       if (typeof parsed.maxBranchIdx !== 'number') parsed.maxBranchIdx = parsed.branchIdx || 0;
       if (typeof parsed.activeMapIdx !== 'number') parsed.activeMapIdx = parsed.branchIdx || 0;
       if (!Array.isArray(parsed.newsList)) parsed.newsList = [{ day: parsed.day || 1, text: parsed.newsHint || 'Chào mừng trở lại văn phòng!' }];
+      const seenNews = new Set();
+      parsed.newsList = parsed.newsList.filter(it => {
+        const k = `${it.day}|${it.text}`;
+        if (seenNews.has(k)) return false;
+        seenNews.add(k); return true;
+      });
       if (typeof parsed.unreadNews !== 'boolean') parsed.unreadNews = false;
       if (typeof parsed.happyHourCooldown !== 'number') parsed.happyHourCooldown = 0;
       CFG.ROOMS.forEach(r => { if (!parsed.rooms[r.id]) parsed.rooms[r.id] = { unlocked: r.unlockedDefault, staff: r.unlockedDefault ? 1 : 0, equipLv: 1, speedLv: 1, hasManager: false, job: null }; if (typeof parsed.rooms[r.id].hasManager !== 'boolean') parsed.rooms[r.id].hasManager = false; });
@@ -231,11 +265,13 @@ window.STARUP_ENGINE = (() => {
 
   // ==================== UI HELPERS ====================
   function addNews(text) {
-    if (!state) return;
+    if (!state || !text) return;
     if (!Array.isArray(state.newsList)) state.newsList = [];
+    const dup = state.newsList.some(item => item.day === state.day && item.text === text);
+    if (dup) return;
     state.newsHint = text;
     state.newsList.unshift({ day: state.day, text });
-    if (state.newsList.length > 10) state.newsList.pop();
+    if (state.newsList.length > 8) state.newsList.pop();
     state.unreadNews = true;
   }
 
@@ -335,8 +371,13 @@ window.STARUP_ENGINE = (() => {
     if (v >= 1000) return sign + (v / 1000).toFixed(1) + 'K';
     return sign + Math.round(v);
   }
+  function isHudShowingExact(n) {
+    if (moneyDisplayMode === 'exact') return true;
+    if (moneyDisplayMode === 'compact') return false;
+    return Math.abs(n) < 10000;
+  }
   function fmtHudMoney(n) {
-    if (exactMoneyMode || Math.abs(n) < 10000) {
+    if (isHudShowingExact(n)) {
       return (n < 0 ? '-' : '') + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
     }
     return (n < 0 ? '-' : '') + '$' + fmtShort(Math.abs(n));
@@ -1492,11 +1533,11 @@ window.STARUP_ENGINE = (() => {
           <strong>2. Khôi phục:</strong> Dán mã <code>STARUP-...</code> vào ô dưới rồi bấm <em>Khôi phục</em>.
         </p>
         <div style="display:flex;gap:0.5cqw;margin-bottom:0.75cqw;">
-          <input id="saveCodeOut" type="text" readonly value="${code}" style="flex:1;padding:0.55cqw 0.8cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-family:monospace;font-size:1.0cqw;background:#FFFDF9;color:#4A3426;" />
+          <textarea id="saveCodeOut" readonly rows="2" style="flex:1;padding:0.5cqw 0.75cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-family:monospace;font-size:0.92cqw;background:#FFFDF9;color:#4A3426;resize:none;word-break:break-all;">${code}</textarea>
           <button id="btnCopyCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">📋 Sao chép</button>
         </div>
         <div style="display:flex;gap:0.5cqw;">
-          <input id="saveCodeIn" type="text" placeholder="Dán mã STARUP-... vào đây" style="flex:1;padding:0.55cqw 0.8cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-size:1.05cqw;background:#FFFDF9;" />
+          <textarea id="saveCodeIn" rows="2" placeholder="Dán mã STARUP-... vào đây" style="flex:1;padding:0.5cqw 0.75cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-size:0.98cqw;background:#FFFDF9;resize:none;word-break:break-all;"></textarea>
           <button id="btnRestoreCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">Khôi phục</button>
         </div>
       </div>
@@ -1665,7 +1706,14 @@ window.STARUP_ENGINE = (() => {
         else if (state.happyHourCooldown > 0) state.happyHourCooldown = Math.max(0, state.happyHourCooldown - rawDt);
 
         const tutPace = (state.tutorialStep === 1 || state.tutorialStep === 2) ? 0.35 : 1.0;
-        if (state.minutes < 1075) state.minutes += dt * 2.4 * tutPace;
+        const closeMin = state.overtimeActive ? 1080 : 1020;
+        const maxMin = closeMin + 35;
+        if (state.minutes < maxMin) state.minutes += dt * 2.4 * tutPace;
+        // Safety guard: if clock reached/passed closing time and day hasn't closed yet, trigger End of Day!
+        if (state.minutes >= closeMin && !state.dailyClosed) {
+          lastPhase = 'night';
+          processEndOfDay();
+        }
 
         const currHour = Math.floor(state.minutes / 60);
         if (currHour >= state.lastStockHour + 2 && currHour <= 17) {
@@ -1720,11 +1768,16 @@ window.STARUP_ENGINE = (() => {
             if (c.patience <= 0) expired.push(c);
           });
           expired.forEach(c => {
-            state.stars = Math.max(0, state.stars - 2);
-            state.morale = Math.max(20, state.morale - 4);
-            AUD.playSFX('alert');
-            const who = c.isVIP ? 'Khách VIP' : 'Khách hàng';
-            showToast(`😤 ${who} đã rời đi: −2 ★`);
+            const targetBusy = !!(state.rooms[c.roomId] && state.rooms[c.roomId].job) || state.disabledRoomId === c.roomId;
+            if (targetBusy) {
+              showToast(`👋 Khách (${c.roomName} đang bận) đã rời đi — không bị trừ ★`);
+            } else {
+              state.stars = Math.max(0, state.stars - 2);
+              state.morale = Math.max(20, state.morale - 4);
+              AUD.playSFX('alert');
+              const who = c.isVIP ? 'Khách VIP' : 'Khách hàng';
+              showToast(`😤 ${who} đã rời đi: −2 ★`);
+            }
             dismissClient(c.id, false);
             autoSave();
             renderHUD();
@@ -1910,7 +1963,7 @@ window.STARUP_ENGINE = (() => {
     document.getElementById('btnIntroRestore').onclick = () => {
       openModal('🔑 Khôi Phục Tiến Độ Bằng Mã', `
         <p style="color:#6B5443;margin:0 0 0.8cqw 0;">Dán mã <code>STARUP-...</code> bạn đã sao lưu vào ô dưới đây:</p>
-        <input id="introCodeInp" type="text" placeholder="STARUP-..." style="width:100%;padding:0.75cqw;border-radius:0.9cqw;border:0.14cqw solid #D8C7B2;font-size:1.15cqw;margin-bottom:0.9cqw;" />
+        <textarea id="introCodeInp" rows="3" placeholder="Dán mã STARUP-... vào đây" style="width:100%;padding:0.7cqw;border-radius:0.9cqw;border:0.14cqw solid #D8C7B2;font-size:1.05cqw;margin-bottom:0.9cqw;resize:none;word-break:break-all;"></textarea>
         <button id="btnConfirmIntroRestore" type="button" style="width:100%;padding:0.85cqw;border-radius:0.95cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Khôi phục & Vào Game</button>
       `);
       document.getElementById('btnConfirmIntroRestore').onclick = () => {
@@ -1936,6 +1989,15 @@ window.STARUP_ENGINE = (() => {
     if (isNew) {
       clientSpawnCooldown = 2.5;
       showToast(`🎉 Chào mừng CEO ${state.ceoName} đến với ${state.companyName}!`);
+    } else {
+      // Lỗi N1 Rescue: If loaded save was stuck near/past closing time (e.g. 17:55 overtime), smoothly finish & open End-of-Day report!
+      const closeMin = state.overtimeActive ? 1080 : 1020;
+      if (!state.dailyClosed && ((state.overtimeActive && state.minutes >= 1074) || state.minutes >= closeMin)) {
+        state.minutes = Math.max(state.minutes, closeMin + 1);
+        lastPhase = 'night';
+        renderHUD();
+        processEndOfDay();
+      }
     }
   }
 
@@ -2015,9 +2077,12 @@ window.STARUP_ENGINE = (() => {
     // Lỗi 11: Tap money pill to toggle full exact dollar amount even above $10,000
     const resPill = document.getElementById('resPill');
     if (resPill) resPill.onclick = () => {
-      exactMoneyMode = !exactMoneyMode;
+      if (!state) return;
+      moneyDisplayMode = isHudShowingExact(state.money) ? 'compact' : 'exact';
       renderHUD();
-      if (state) showToast(`💰 Số dư chính xác: ${FIN.fmtMoney(state.money)}`);
+      showToast(moneyDisplayMode === 'exact'
+        ? `💰 Hiển thị số chính xác: ${FIN.fmtMoney(state.money)}`
+        : `💰 Hiển thị rút gọn: ${fmtHudMoney(state.money)}`);
     };
 
     // Lỗi 3: Hard scroll guard so viewport never shifts off-screen on mobile
