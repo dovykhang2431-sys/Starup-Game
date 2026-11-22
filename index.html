@@ -33,7 +33,7 @@
 
   <!-- Main 16:9 Locked Stage -->
   <div id="appRoot">
-    <div id="gameScreen">
+    <div id="gameScreen" class="intro-active">
 
       <div id="stageViewport">
         <!-- 1. Day & Night Empty Isometric Office Maps -->
@@ -54,17 +54,18 @@
       <!-- 5. Top Proportional Tactile HUD -->
       <div class="hud-top">
         <div style="display:flex;align-items:center;gap:0.75cqw;">
-          <div class="hud-cream res-pill">
+          <div id="resPill" class="hud-cream res-pill" title="Bấm để xem số tiền chính xác" style="cursor:pointer;">
             <span class="res-badge" style="background:linear-gradient(180deg,#34D399,#059669);color:#fff;">$</span>
-            <span id="hudMoney">900</span>
+            <span id="hudMoney">$500</span>
             <span style="width:0.13cqw;height:1.65cqw;background:#D8C7B2;"></span>
             <span class="res-badge" style="background:linear-gradient(180deg,#FDE047,#D97706);color:#451A03;">★</span>
-            <span id="hudStars">10</span>
+            <span id="hudStars">5</span>
             <span style="width:0.13cqw;height:1.65cqw;background:#D8C7B2;"></span>
             <span id="hudCompanyTag" style="color:#B45309;font-size:1.22cqw;">Nova Tech</span>
           </div>
           <!-- News Button (Custom SVG) -->
-          <button id="btnNews" type="button" title="Tin nóng thị trường" class="hud-cream icon-circle">
+          <button id="btnNews" type="button" title="Tin nóng thị trường" class="hud-cream icon-circle" style="position:relative;">
+            <span id="newsPip" class="dock-pip hidden" style="top:-0.25cqw;right:-0.25cqw;">!</span>
             <svg viewBox="0 0 32 32" style="width:100%;height:100%;" fill="none">
               <rect x="4" y="6" width="24" height="20" rx="4" fill="#FEF3C7" stroke="#B45309" stroke-width="2.2"/>
               <rect x="8" y="10" width="9" height="6" rx="1.5" fill="#F59E0B"/>

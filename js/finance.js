@@ -211,7 +211,8 @@ window.STARUP_FINANCE = (() => {
                 <div style="display:flex;gap:0.38cqw;">
                   <button data-stk-buy="${st.symbol}" type="button" style="padding:0.48cqw 0.78cqw;border-radius:0.75cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Mua 1</button>
                   <button data-stk-buy5="${st.symbol}" type="button" style="padding:0.48cqw 0.68cqw;border-radius:0.75cqw;background:#0284C7;color:#fff;font-weight:800;border:none;cursor:pointer;">x5</button>
-                  <button data-stk-sell="${st.symbol}" type="button" style="padding:0.48cqw 0.78cqw;border-radius:0.75cqw;background:#EFE6DA;color:#3D2B1F;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">Bán</button>
+                  <button data-stk-sell1="${st.symbol}" type="button" style="padding:0.48cqw 0.65cqw;border-radius:0.75cqw;background:#FEF3C7;color:#92400E;font-weight:800;border:0.12cqw solid #FCD34D;cursor:pointer;">Bán 1</button>
+                  <button data-stk-sell="${st.symbol}" type="button" style="padding:0.48cqw 0.72cqw;border-radius:0.75cqw;background:#EFE6DA;color:#3D2B1F;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">Bán hết</button>
                 </div>
               </div>
             `;

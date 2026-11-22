@@ -20,8 +20,18 @@ window.STARUP_AVATARS = (() => {
 
   function renderTokenImg(roleKey, alt = 'Nhân vật') {
     const src = TOKEN_PATHS[roleKey] || TOKEN_PATHS.ceo;
-    return `<img src="${src}" alt="${alt}" class="token-img" />`;
+    return `<img src="${src}" alt="${alt}" class="token-img" onerror="if(!this.dataset.retried){this.dataset.retried=1;this.src=this.src+'?r=1';}else{this.onerror=null;this.src='assets/tokens/ceo.png';}" />`;
   }
 
-  return { TOKEN_PATHS, CEO_CHOICES, renderTokenImg };
+  function preloadAll() {
+    const urls = new Set([
+      ...Object.values(TOKEN_PATHS),
+      'assets/office_day.jpg',
+      'assets/office_night.jpg',
+      'assets/office_tokyo.jpg',
+      'assets/office_ny.jpg'
+    ]);
+    urls.forEach(u => { const im = new Image(); im.src = u; });
+  }
+  return { TOKEN_PATHS, CEO_CHOICES, renderTokenImg, preloadAll };
 })();

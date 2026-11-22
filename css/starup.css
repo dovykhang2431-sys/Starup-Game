@@ -408,7 +408,7 @@ html, body {
 .work-progress-pill {
   position: absolute;
   transform: translate(-50%, -50%);
-  z-index: 25;
+  z-index: 29;
   background: rgba(255, 252, 247, 0.96);
   border: 0.14cqw solid #CBBBA8;
   border-radius: 999px;
@@ -427,7 +427,7 @@ html, body {
 .work-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, #34D399, #059669);
-  transition: width 0.2s linear;
+  transition: none;
 }
 
 /* Chibi Head Tokens */
@@ -518,8 +518,8 @@ html, body {
   overflow: hidden;
   transition: transform 0.26s cubic-bezier(0.34, 1.4, 0.64, 1), opacity 0.2s ease;
 }
-.upgrade-popup.closed { transform: translateX(118%) scale(0.96); opacity: 0; pointer-events: none; }
-.upgrade-popup.open   { transform: translateX(0) scale(1); opacity: 1; pointer-events: auto; }
+.upgrade-popup.closed { transform: translateX(118%) scale(0.96); opacity: 0; pointer-events: none; visibility: hidden; }
+.upgrade-popup.open   { transform: translateX(0) scale(1); opacity: 1; pointer-events: auto; visibility: visible; }
 
 .up-hero {
   background: linear-gradient(180deg, #6A4B37 0%, #4A3324 100%);
@@ -659,7 +659,7 @@ html, body {
 .modal-overlay {
   position: absolute;
   inset: 0;
-  z-index: 50;
+  z-index: 60;
   background: rgba(58, 41, 30, 0.62);
   backdrop-filter: blur(4px);
   display: flex;
@@ -738,15 +738,17 @@ html, body {
 
 #toast {
   position: absolute;
-  bottom: 8.4cqw;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 65;
-  padding: 0.55cqw 1.45cqw;
-  border-radius: 999px;
-  font-size: 1.22cqw;
+  top: 6.2cqw;
+  right: 1.8cqw;
+  z-index: 68;
+  max-width: 44cqw;
+  padding: 0.5cqw 1.2cqw;
+  border-radius: 1.1cqw;
+  font-size: 1.12cqw;
   font-weight: 800;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: right;
+  pointer-events: none;
 }
 #saveDot {
   position: absolute;
@@ -1024,4 +1026,33 @@ html, body {
   white-space: nowrap;
   box-shadow: 0 0.28cqw 0.8cqw rgba(61, 43, 31, 0.2);
   animation: banterPop 2.7s ease-out forwards;
+}
+
+
+/* Lỗi 1: Hide HUD behind Intro screen until player actually enters the game */
+#gameScreen.intro-active .hud-top,
+#gameScreen.intro-active .hud-bottom,
+#gameScreen.intro-active #mktBanner,
+#gameScreen.intro-active #eventBanner,
+#gameScreen.intro-active #debtBanner,
+#gameScreen.intro-active #tutorialBanner {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+/* Lỗi 3: Hard-clip viewport so mobile browsers can never scroll/shift UI off-screen */
+html, body, #appRoot, #gameScreen {
+  overflow: hidden;
+  overflow: clip;
+}
+
+/* Lỗi 8: Banter pill positioned cleanly at top-center edge below clock so it never covers room locks */
+.banter-bubble {
+  z-index: 26 !important;
+  font-size: 0.9cqw !important;
+  padding: 0.2cqw 0.65cqw !important;
+  max-width: 24cqw;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
