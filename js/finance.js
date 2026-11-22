@@ -248,7 +248,8 @@ window.STARUP_FINANCE = (() => {
   }
 
   function getUnlockedDeptCount(state) {
-    return CFG.ROOMS.filter(r => r.id !== 'lobby' && state.rooms[r.id] && state.rooms[r.id].unlocked).length;
+    const rooms = (window.STARUP_CONFIG && window.STARUP_CONFIG.ROOMS) || [];
+    return rooms.filter(r => r.id !== 'lobby' && state.rooms && state.rooms[r.id] && state.rooms[r.id].unlocked).length;
   }
 
   return { fmtMoney, updateStockPrices, getPortfolioValue, getNetWorth, getBuyback5Cost, getUnlockedDeptCount, buildFinanceModalHTML };

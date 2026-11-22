@@ -1,4 +1,4 @@
-const CACHE_NAME = 'starup-pwa-v9.9';
+const CACHE_NAME = 'starup-pwa-v9.10';
 const PRECACHE_ASSETS = [
   './',
   './index.html',

@@ -1224,13 +1224,13 @@ window.STARUP_ENGINE = (() => {
       `);
       document.getElementById('evA').onclick = () => {
         if (state.money < fixCost) return showToast(`Không đủ $${fixCost} tiền mặt — hãy chọn phương án B!`);
-        state.money -= fixCost; closeModal(); showToast(`${TICK_SVG}Đã sửa xong sự cố điện tại ${targetRoom.name}!`); renderHUD();
+        state.money -= fixCost; closeModal(); autoSave(); showToast(`${TICK_SVG}Đã sửa xong sự cố điện tại ${targetRoom.name}!`); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
         state.disabledRoomId = targetRoom.id;
         state.activeEventTag = `🔧 ${targetRoom.name} tạm ngừng do chập điện`;
         // Pause room without deleting running job so progress is preserved!
-        closeModal(); showToast(`⚡ ${targetRoom.name} đã tạm khóa trên bản đồ!`); renderHUD(); renderMapOverlays();
+        closeModal(); autoSave(); showToast(`⚡ ${targetRoom.name} đã tạm khóa trên bản đồ!`); renderHUD(); renderMapOverlays();
       };
     } else if (kind === 'staff_sick') {
       const altRooms = workRooms.filter(r => r.id !== state.lastSickRoomId);
@@ -1274,11 +1274,12 @@ window.STARUP_ENGINE = (() => {
       if (hasFin) {
         document.getElementById('evFinPass').onclick = () => {
           state.money += 300; state.stars += 4; AUD.playSFX('cash'); closeModal();
+          autoSave();
           showToast(`${TICK_SVG}Vượt qua Thanh tra Thuế! +$300 & +4 ★`); renderHUD();
         };
       } else {
-        document.getElementById('evA').onclick = () => { if (state.money < 420) return showToast('Không đủ $420 tiền mặt — hãy chọn phương án B!'); state.money -= 420; closeModal(); showToast('Đã nộp phạt bổ sung -$420. Hãy sớm mở Phòng Tài Chính!'); renderHUD(); };
-        document.getElementById('evB').onclick = () => { state.stars = Math.max(0, state.stars - 4); closeModal(); showToast('Đã gia hạn giải trình (-4 ★ Uy tín).'); renderHUD(); };
+        document.getElementById('evA').onclick = () => { if (state.money < 420) return showToast('Không đủ $420 tiền mặt — hãy chọn phương án B!'); state.money -= 420; closeModal(); autoSave(); showToast('Đã nộp phạt bổ sung -$420. Hãy sớm mở Phòng Tài Chính!'); renderHUD(); };
+        document.getElementById('evB').onclick = () => { state.stars = Math.max(0, state.stars - 4); closeModal(); autoSave(); showToast('Đã gia hạn giải trình (-4 ★ Uy tín).'); renderHUD(); };
       }
     } else if (kind === 'industry_boom') {
       autoSave();
@@ -1341,12 +1342,12 @@ window.STARUP_ENGINE = (() => {
       document.getElementById('evA').onclick = () => {
         state.clientRateDebuff = 0.7;
         state.activeEventTag = '📉 Thị trường chững (-30% khách · [GOLD] +16%)';
-        closeModal(); renderHUD();
+        closeModal(); autoSave(); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
         if (state.money < 250) return showToast('Không đủ $250 tiền mặt — hãy chọn phương án A!');
         state.money -= 250; state.stars += 3;
-        closeModal(); showToast(`${TICK_SVG}Tung khuyến mãi thành công! Lượng khách giữ ổn định (+3 ★).`); renderHUD();
+        closeModal(); autoSave(); showToast(`${TICK_SVG}Tung khuyến mãi thành công! Lượng khách giữ ổn định (+3 ★).`); renderHUD();
       };
     }
   }
@@ -2353,7 +2354,9 @@ window.STARUP_ENGINE = (() => {
       renderHUD();
     };
 
-    window.addEventListener('beforeunload', () => { if (rafId) cancelAnimationFrame(rafId); AUD.stopBGM(); });
+    window.addEventListener('beforeunload', () => { autoSave(); if (rafId) cancelAnimationFrame(rafId); AUD.stopBGM(); });
+    window.addEventListener('pagehide', () => { autoSave(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) autoSave(); });
 
     // Lỗi 10: Preload all office maps & tokens + add one-time retry on image load error
     if (AVA.preloadAll) AVA.preloadAll();
