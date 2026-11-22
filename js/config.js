@@ -139,13 +139,13 @@ window.STARUP_CONFIG = {
   ],
 
   LOANS: [
-    { id: 'loan_small', name: 'Tín Chấp Khởi Nghiệp', amount: 800, dailyPay: 190, days: 5, reqDay: 2, reqStars: 10, reqFinance: false, reqRooms: 2, desc: 'Trả $190/ngày × 5 ngày · Cần Ngày 2 & ≥ 10 ★' },
+    { id: 'loan_small', name: 'Tín Chấp Khởi Nghiệp', amount: 800, dailyPay: 190, days: 5, reqDay: 2, reqStars: 0, reqFinance: false, reqRooms: 2, desc: 'Trả $190/ngày × 5 ngày · Mở ngay từ Ngày 2' },
     { id: 'loan_mid', name: 'Vay Doanh Nghiệp Nhỏ', amount: 3000, dailyPay: 720, days: 5, reqDay: 4, reqStars: 25, reqFinance: true, reqRooms: 3, desc: 'Trả $720/ngày × 5 ngày · Cần Ngày 4, P.Tài Chính & ≥ 25 ★' },
     { id: 'loan_ipo', name: 'Tín Dụng Tăng Trưởng', amount: 10000, dailyPay: 2500, days: 5, reqDay: 7, reqStars: 55, reqFinance: true, reqRooms: 5, desc: 'Trả $2,500/ngày × 5 ngày · Cần Ngày 7, ≥ 5 phòng & ≥ 55 ★' }
   ],
 
   FUNDING_ROUNDS: [
-    { id: 'fund_angel', name: 'Nhà Đầu Tư Thiên Thần', icon: '🤝', amount: 2000, equity: 10, reqDay: 3, reqStars: 15, reqRooms: 3, reqRoomId: null, desc: 'Nhận ngay $2,000 không cần trả góp · Chia 10% tiền lời hằng ngày.' },
+    { id: 'fund_angel', name: 'Nhà Đầu Tư Thiên Thần', icon: '🤝', amount: 2000, equity: 10, reqDay: 3, reqStars: 8, reqRooms: 2, reqRoomId: null, desc: 'Nhận ngay $2,000 không cần trả góp · Chia 10% tiền lời hằng ngày.' },
     { id: 'fund_seed', name: 'Quỹ Khởi Nghiệp', icon: '🌱', amount: 6000, equity: 15, reqDay: 6, reqStars: 15, reqRooms: 4, reqRoomId: 'finance', desc: 'Nhận ngay $6,000 mở rộng nhanh · Chia 15% tiền lời hằng ngày. Cần P.Tài Chính.' },
     { id: 'fund_corp', name: 'Tập Đoàn Đầu Tư', icon: '🏛️', amount: 15000, equity: 20, reqDay: 9, reqStars: 75, reqRooms: 5, reqRoomId: 'tech', desc: 'Nhận ngay $15,000 bệ phóng IPO · Chia 20% tiền lời hằng ngày. Cần P.Kỹ Thuật.' }
   ],

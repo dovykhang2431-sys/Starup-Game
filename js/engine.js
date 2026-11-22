@@ -71,6 +71,7 @@ window.STARUP_ENGINE = (() => {
       dailyCompletedJobs: [],
       eventTriggeredToday: false,
       lastPowerOutageDay: -10,
+      lastEventKind: '',
       isBankrupt: false,
       overtimeActive: false,
       happyHourLeft: 0,
@@ -251,6 +252,7 @@ window.STARUP_ENGINE = (() => {
     parsed.newsList = parsed.newsList.filter(it => { const k = `${it.day}|${it.text}`; if (seenNews.has(k)) return false; seenNews.add(k); return true; });
     if (typeof parsed.unreadNews !== 'boolean') parsed.unreadNews = false;
     if (typeof parsed.lastPowerOutageDay !== 'number') parsed.lastPowerOutageDay = -10;
+      if (typeof parsed.lastEventKind !== 'string') parsed.lastEventKind = '';
     if (typeof parsed.isBankrupt !== 'boolean') parsed.isBankrupt = false;
     if (typeof parsed.happyHourCooldown !== 'number') parsed.happyHourCooldown = 0;
     CFG.ROOMS.forEach(r => {
@@ -629,9 +631,10 @@ window.STARUP_ENGINE = (() => {
     const rs = state.rooms[c.roomId];
     const busy = !!rs.job;
     const disabled = state.disabledRoomId === c.roomId;
+    const rushPenaltyText = FIN.fmtMoney(c.penalty || Math.min(250, Math.round(c.reward * 0.5)));
     const tierTag = c.tier === 'rush'
-      ? '<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#FFEDD5;color:#C2410C;font-weight:900;font-size:1cqw;">⚡ HỎA TỐC (Trễ hạn: phạt ${FIN.fmtMoney(c.penalty || Math.min(250, Math.round(c.reward * 0.5)))} & −2 ★)</span>'
-      : (c.tier === 'mega' ? '<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#EDE9FE;color:#6D28D9;font-weight:900;font-size:1cqw;">🌟 DỰ ÁN LỚN (x2.1 Thưởng)</span>' : '');
+      ? `<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#FFEDD5;color:#C2410C;font-weight:900;font-size:1cqw;">⚡ HỎA TỐC (Trễ hạn: phạt ${rushPenaltyText} & −2 ★)</span>`
+      : (c.tier === 'mega' ? `<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#EDE9FE;color:#6D28D9;font-weight:900;font-size:1cqw;">🌟 DỰ ÁN LỚN (x2.1 Thưởng)</span>` : '');
 
     openModal(`${c.isVIP ? '💎 Hợp Đồng VIP' : '📋 Hợp Đồng Mới'}`, `
       <div style="background:#FAF6F0;border:0.13cqw solid #DFD2C1;border-radius:1.2cqw;padding:1.2cqw;margin-bottom:1.1cqw;">
@@ -774,7 +777,7 @@ window.STARUP_ENGINE = (() => {
           <div style="padding:0.85cqw 1cqw;border-radius:1.05cqw;border:0.12cqw solid ${job.ready ? '#34D399' : '#DFD2C1'};background:${job.ready ? '#ECFDF5' : '#FAF6F0'};display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
             <div style="flex:1;min-width:0;">
               <div style="font-weight:900;color:#3D2B1F;">${rc.icon} ${job.title} <span style="font-weight:700;color:#6B5443;">(${rc.name})</span></div>
-              <div style="font-size:1.02cqw;color:#6B5443;margin-top:0.15cqw;">Thù lao: <strong style="color:#059669;">${FIN.fmtMoney(job.reward)}</strong> · Tiến độ: <strong>${Math.floor(job.progress)}%</strong></div>
+              <div style="font-size:1.02cqw;color:#6B5443;margin-top:0.15cqw;">Thù lao: <strong style="color:#059669;">${FIN.fmtMoney(job.reward)}</strong> · Tiến độ: <strong>${Math.min(100, Math.floor(job.progress || 0))}%</strong> ${job.issue ? `<span style="color:#DC2626;font-weight:800;">(⏸️ Đang tạm dừng)</span>` : ''}</div>
             </div>
             <div style="flex-shrink:0;">
               ${job.ready
@@ -810,7 +813,7 @@ window.STARUP_ENGINE = (() => {
     document.querySelectorAll('[data-rep-fix]').forEach(b => {
       b.onclick = () => {
         const rs = state.rooms[b.dataset.repFix];
-        if (rs && rs.job) { rs.job.issue = null; AUD.playSFX('click'); renderMapOverlays(); openReportModal('working'); }
+        if (rs && rs.job) { rs.job.issue = null; AUD.playSFX('click'); autoSave(); renderMapOverlays(true); openReportModal('working'); }
       };
     });
   }
@@ -1186,7 +1189,10 @@ window.STARUP_ENGINE = (() => {
 
     const pool = ['staff_sick', 'tax_audit', 'macro_wave'];
     if ((state.day - (state.lastPowerOutageDay || -10)) >= 6) pool.push('power_outage');
-    const kind = pool[Math.floor(Math.random() * pool.length)];
+    const nonDupPool = pool.filter(k => k !== state.lastEventKind);
+    const activePool = nonDupPool.length ? nonDupPool : pool;
+    const kind = activePool[Math.floor(Math.random() * activePool.length)];
+    state.lastEventKind = kind;
     AUD.playSFX('alert');
 
     if (kind === 'power_outage') {
@@ -1279,6 +1285,23 @@ window.STARUP_ENGINE = (() => {
     if (state.dailyClosed) return;
     state.dailyClosed = true;
     dismissAllClients();
+
+    // Lỗi P4: Auto-collect all finished-but-uncollected contracts before daily P&L & bankruptcy check
+    let autoCollectedCash = 0;
+    let autoCollectedStars = 0;
+    CFG.ROOMS.forEach(rc => {
+      const rs = state.rooms[rc.id];
+      if (rs && rs.unlocked && rs.job && rs.job.ready) {
+        const j = rs.job;
+        const st = (typeof j.stars === 'number' && j.stars > 0) ? j.stars : (j.tier === 'mega' ? 5 : (j.isVIP ? 3 : 2));
+        autoCollectedCash += j.reward;
+        autoCollectedStars += st;
+        deliverRoomJob(rc.id);
+      }
+    });
+    if (autoCollectedCash > 0) {
+      showToast(`${TICK_SVG}Đã tự động thu hợp đồng hoàn thành cuối ngày: +${FIN.fmtMoney(autoCollectedCash)} & +${autoCollectedStars} ★`);
+    }
 
     agents.forEach((a, i) => {
       if (a.role === 'staff' && !a.sickToday) {
