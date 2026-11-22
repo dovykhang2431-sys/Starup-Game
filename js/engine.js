@@ -70,6 +70,8 @@ window.STARUP_ENGINE = (() => {
       dayPenalty: 0,
       dailyCompletedJobs: [],
       eventTriggeredToday: false,
+      lastPowerOutageDay: -10,
+      isBankrupt: false,
       overtimeActive: false,
       happyHourLeft: 0,
       happyHourCooldown: 0,
@@ -95,67 +97,173 @@ window.STARUP_ENGINE = (() => {
     };
   }
 
-  // ==================== SAVE / LOAD / RECOVERY CODE ====================
-  function compactStateForSave(st) {
-    // Strip bulky history/log tails while keeping 100% of game progress & exact state
-    const clone = JSON.parse(JSON.stringify(st));
-    clone.minutes = Math.round((clone.minutes || 474) * 10) / 10;
-    clone.happyHourLeft = Math.round((clone.happyHourLeft || 0) * 10) / 10;
-    clone.happyHourCooldown = Math.round((clone.happyHourCooldown || 0) * 10) / 10;
-    if (Array.isArray(clone.stocks)) {
-      clone.stocks = clone.stocks.map(x => ({
-        symbol: x.symbol, name: x.name, price: x.price, prevPrice: x.prevPrice,
-        volatility: x.volatility, color: x.color, shares: x.shares || 0,
-        avgCost: Math.round((x.avgCost || 0) * 100) / 100, nextBias: x.nextBias || 0,
-        isOwn: !!x.isOwn, history: (x.history || []).slice(-4)
-      }));
-    }
-    if (Array.isArray(clone.newsList)) clone.newsList = clone.newsList.slice(0, 4);
-    if (Array.isArray(clone.dailyCompletedJobs)) clone.dailyCompletedJobs = clone.dailyCompletedJobs.slice(0, 6);
-    if (clone.rooms) {
-      Object.keys(clone.rooms).forEach(k => {
-        const j = clone.rooms[k] && clone.rooms[k].job;
-        if (j) j.progress = Math.round((j.progress || 0) * 10) / 10;
+  // ==================== SAVE / LOAD / ULTRA-COMPACT RECOVERY CODE (STARUP2) ====================
+  function packCompactState(st) {
+    const rm = {};
+    CFG.ROOMS.forEach(rc => {
+      const r = st.rooms[rc.id];
+      if (!r) return;
+      // [unlocked, staff, equipLv, speedLv, hasManager]
+      rm[rc.id] = [r.unlocked ? 1 : 0, r.staff || 0, r.equipLv || 1, r.speedLv || 1, r.hasManager ? 1 : 0];
+    });
+    const sk = (st.stocks || []).map(x => [x.symbol, Math.round(x.price), x.shares || 0, Math.round((x.avgCost || 0) * 10) / 10, x.isOwn ? 1 : 0]);
+    return {
+      v: 2,
+      c: [st.ceoName, st.companyName, st.ceoAvatar],
+      g: [
+        st.day, Math.round(st.minutes), st.speed || 1, Math.round(st.money), st.stars,
+        st.morale, st.brandAwareness || 0, Math.round(st.peakNetWorth || st.money),
+        st.contractsDone || 0, st.debtDays || 0, st.tutorialStep || 0, Math.round(st.dayRevenue || 0),
+        st.ipoDone ? 1 : 0, st.ticker || '', st.branchIdx || 0, st.maxBranchIdx || 0, st.activeMapIdx || 0,
+        st.investorEquity || 0, st.overtimeActive ? 1 : 0, Math.round(st.happyHourLeft || 0),
+        Math.round(st.happyHourCooldown || 0), st.dailyClosed ? 1 : 0, st.lastPowerOutageDay || -10
+      ],
+      r: rm,
+      l: st.loan ? [st.loan.name, st.loan.dailyPay, st.loan.daysLeft] : 0,
+      sv: [Math.round(st.savings.flex || 0), Math.round(st.savings.fixed || 0), st.savings.fixedDaysLeft || 0],
+      st: sk,
+      f: st.fundingTaken || [],
+      p: st.products || {},
+      rv: st.acquiredRivals || [],
+      mk: st.marketingCampaign ? [st.marketingCampaign.id, st.marketingCampaign.daysLeft] : 0
+    };
+  }
+
+  function unpackCompactState(d) {
+    const baseSt = createFreshState(d.c[0], d.c[1], d.c[2]);
+    const g = d.g || [];
+    baseSt.day = g[0] || 1;
+    baseSt.minutes = g[1] || 474;
+    baseSt.speed = g[2] !== undefined ? g[2] : 1;
+    baseSt.money = g[3] || 0;
+    baseSt.stars = g[4] || 0;
+    baseSt.morale = g[5] !== undefined ? g[5] : 85;
+    baseSt.brandAwareness = g[6] || 0;
+    baseSt.peakNetWorth = g[7] || baseSt.money;
+    baseSt.contractsDone = g[8] || 0;
+    baseSt.debtDays = g[9] || 0;
+    baseSt.tutorialStep = g[10] || 0;
+    baseSt.dayRevenue = g[11] || 0;
+    baseSt.ipoDone = !!g[12];
+    baseSt.ticker = g[13] || '';
+    baseSt.branchIdx = g[14] || 0;
+    baseSt.maxBranchIdx = g[15] || baseSt.branchIdx;
+    baseSt.activeMapIdx = g[16] !== undefined ? g[16] : baseSt.branchIdx;
+    baseSt.investorEquity = g[17] || 0;
+    baseSt.overtimeActive = !!g[18];
+    baseSt.happyHourLeft = g[19] || 0;
+    baseSt.happyHourCooldown = g[20] || 0;
+    baseSt.dailyClosed = !!g[21];
+    baseSt.lastPowerOutageDay = g[22] !== undefined ? g[22] : -10;
+
+    if (d.r) {
+      CFG.ROOMS.forEach(rc => {
+        const arr = d.r[rc.id];
+        if (Array.isArray(arr)) {
+          baseSt.rooms[rc.id] = { unlocked: !!arr[0], staff: arr[1] || 0, equipLv: arr[2] || 1, speedLv: arr[3] || 1, hasManager: !!arr[4], job: null };
+        }
       });
     }
-    return clone;
+    baseSt.loan = Array.isArray(d.l) ? { name: d.l[0], dailyPay: d.l[1], daysLeft: d.l[2] } : null;
+    if (Array.isArray(d.sv)) baseSt.savings = { flex: d.sv[0] || 0, fixed: d.sv[1] || 0, fixedDaysLeft: d.sv[2] || 0 };
+    if (Array.isArray(d.st) && d.st.length) {
+      baseSt.stocks = d.st.map(arr => {
+        const b = CFG.STOCKS_INIT.find(x => x.symbol === arr[0]);
+        const p = arr[1] || (b ? b.price : 100);
+        return {
+          symbol: arr[0], name: b ? b.name : (baseSt.companyName + ' (Của bạn)'),
+          price: p, prevPrice: p, volatility: b ? b.volatility : 0.08,
+          color: b ? b.color : '#10B981', shares: arr[2] || 0, avgCost: arr[3] || 0,
+          nextBias: 0, isOwn: !!arr[4], history: [Math.max(15, Math.round(p * 0.96)), p]
+        };
+      });
+    }
+    baseSt.fundingTaken = Array.isArray(d.f) ? d.f : [];
+    baseSt.products = d.p || {};
+    baseSt.acquiredRivals = Array.isArray(d.rv) ? d.rv : [];
+    if (Array.isArray(d.mk)) {
+      const mc = CFG.MARKETING_CAMPAIGNS.find(x => x.id === d.mk[0]);
+      if (mc) baseSt.marketingCampaign = { id: mc.id, name: mc.name, icon: mc.icon, daysLeft: d.mk[1], spawnBoost: mc.spawnBoost, rewardMult: mc.rewardMult, vipChance: mc.vipChance };
+    }
+    baseSt.dailyQuests = QST.generateDailyQuests(baseSt.day);
+    baseSt.newsList = [{ day: baseSt.day, text: `Chào mừng CEO ${baseSt.ceoName} trở lại điều hành ${baseSt.companyName} (Ngày ${baseSt.day})!` }];
+    baseSt.newsHint = baseSt.newsList[0].text;
+    return baseSt;
   }
 
   function encodeSaveCode(st) {
     try {
-      const compact = compactStateForSave(st);
-      return 'STARUP-' + btoa(unescape(encodeURIComponent(JSON.stringify(compact))));
+      const packed = packCompactState(st);
+      return 'STARUP2-' + btoa(unescape(encodeURIComponent(JSON.stringify(packed))));
     } catch (e) { return ''; }
   }
-  function decodeSaveCode(code) {
+
+  function decodeSaveCodeWithReason(code) {
+    const raw = (code || '').trim();
+    if (!raw) return { data: null, error: 'Bạn chưa dán mã khôi phục!' };
+    if (!raw.startsWith('STARUP-') && !raw.startsWith('STARUP2-')) {
+      return { data: null, error: 'Mã sai định dạng (phải bắt đầu bằng STARUP2- hoặc STARUP-).' };
+    }
+    const isV2 = raw.startsWith('STARUP2-');
+    const b64 = raw.replace(/^STARUP2?-/, '').replace(/\s+/g, '');
+    let jsonStr = '';
     try {
-      const clean = (code || '').trim().replace(/^STARUP-/, '');
-      const parsed = JSON.parse(decodeURIComponent(escape(atob(clean))));
-      if (!parsed || typeof parsed.money !== 'number' || !parsed.rooms) return null;
-      // Migrate older saves missing finance room or morale
-      if (!parsed.rooms.finance) parsed.rooms.finance = { unlocked: false, staff: 0, equipLv: 1, speedLv: 1, job: null };
-      if (typeof parsed.morale !== 'number') parsed.morale = 85;
-      if (!Array.isArray(parsed.dailyCompletedJobs)) parsed.dailyCompletedJobs = [];
-      if (typeof parsed.investorEquity !== 'number') parsed.investorEquity = 0;
-      if (!Array.isArray(parsed.fundingTaken)) parsed.fundingTaken = [];
-      if (!parsed.products) parsed.products = {};
-      if (!Array.isArray(parsed.acquiredRivals)) parsed.acquiredRivals = [];
-      if (!Array.isArray(parsed.dailyQuests)) parsed.dailyQuests = QST.generateDailyQuests(parsed.day || 1);
-      if (typeof parsed.maxBranchIdx !== 'number') parsed.maxBranchIdx = parsed.branchIdx || 0;
-      if (typeof parsed.activeMapIdx !== 'number') parsed.activeMapIdx = parsed.branchIdx || 0;
-      if (!Array.isArray(parsed.newsList)) parsed.newsList = [{ day: parsed.day || 1, text: parsed.newsHint || 'Chào mừng trở lại văn phòng!' }];
-      const seenNews = new Set();
-      parsed.newsList = parsed.newsList.filter(it => {
-        const k = `${it.day}|${it.text}`;
-        if (seenNews.has(k)) return false;
-        seenNews.add(k); return true;
+      jsonStr = decodeURIComponent(escape(atob(b64)));
+    } catch (e) {
+      return { data: null, error: `Mã bị cắt ngắn hoặc thiếu ký tự ở đuôi (hiện có ${raw.length} ký tự).` };
+    }
+    let parsed = null;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      return { data: null, error: `Mã bị cắt giữa chừng nên dữ liệu chưa đóng ngoặc (hiện có ${raw.length} ký tự).` };
+    }
+    if (isV2 && parsed && parsed.v === 2 && Array.isArray(parsed.c) && Array.isArray(parsed.g)) {
+      return { data: unpackCompactState(parsed), error: null };
+    }
+    if (!parsed || typeof parsed.money !== 'number' || !parsed.rooms) {
+      return { data: null, error: 'Dữ liệu bên trong mã bị hỏng hoặc không đúng cấu trúc.' };
+    }
+    // Legacy STARUP- save migration
+    if (Array.isArray(parsed.stocks)) {
+      parsed.stocks = parsed.stocks.map(st => {
+        const b = CFG.STOCKS_INIT.find(x => x.symbol === st.symbol);
+        return {
+          symbol: st.symbol, name: st.name || (b ? b.name : (parsed.companyName + ' (Của bạn)')),
+          price: st.price, prevPrice: st.prevPrice || st.price, volatility: st.volatility || (b ? b.volatility : 0.08),
+          color: st.color || (b ? b.color : '#10B981'), shares: st.shares || 0, avgCost: st.avgCost || 0,
+          nextBias: st.nextBias || 0, isOwn: !!st.isOwn, history: Array.isArray(st.history) && st.history.length ? st.history : [st.price, st.price]
+        };
       });
-      if (typeof parsed.unreadNews !== 'boolean') parsed.unreadNews = false;
-      if (typeof parsed.happyHourCooldown !== 'number') parsed.happyHourCooldown = 0;
-      CFG.ROOMS.forEach(r => { if (!parsed.rooms[r.id]) parsed.rooms[r.id] = { unlocked: r.unlockedDefault, staff: r.unlockedDefault ? 1 : 0, equipLv: 1, speedLv: 1, hasManager: false, job: null }; if (typeof parsed.rooms[r.id].hasManager !== 'boolean') parsed.rooms[r.id].hasManager = false; });
-      return parsed;
-    } catch (e) { return null; }
+    }
+    if (!parsed.rooms.finance) parsed.rooms.finance = { unlocked: false, staff: 0, equipLv: 1, speedLv: 1, hasManager: false, job: null };
+    if (typeof parsed.morale !== 'number') parsed.morale = 85;
+    if (!Array.isArray(parsed.dailyCompletedJobs)) parsed.dailyCompletedJobs = [];
+    if (typeof parsed.investorEquity !== 'number') parsed.investorEquity = 0;
+    if (!Array.isArray(parsed.fundingTaken)) parsed.fundingTaken = [];
+    if (!parsed.products) parsed.products = {};
+    if (!Array.isArray(parsed.acquiredRivals)) parsed.acquiredRivals = [];
+    if (!Array.isArray(parsed.dailyQuests)) parsed.dailyQuests = QST.generateDailyQuests(parsed.day || 1);
+    if (typeof parsed.maxBranchIdx !== 'number') parsed.maxBranchIdx = parsed.branchIdx || 0;
+    if (typeof parsed.activeMapIdx !== 'number') parsed.activeMapIdx = parsed.branchIdx || 0;
+    if (!Array.isArray(parsed.newsList)) parsed.newsList = [{ day: parsed.day || 1, text: parsed.newsHint || 'Chào mừng trở lại!' }];
+    const seenNews = new Set();
+    parsed.newsList = parsed.newsList.filter(it => { const k = `${it.day}|${it.text}`; if (seenNews.has(k)) return false; seenNews.add(k); return true; });
+    if (typeof parsed.unreadNews !== 'boolean') parsed.unreadNews = false;
+    if (typeof parsed.lastPowerOutageDay !== 'number') parsed.lastPowerOutageDay = -10;
+    if (typeof parsed.isBankrupt !== 'boolean') parsed.isBankrupt = false;
+    if (typeof parsed.happyHourCooldown !== 'number') parsed.happyHourCooldown = 0;
+    CFG.ROOMS.forEach(r => {
+      if (!parsed.rooms[r.id]) parsed.rooms[r.id] = { unlocked: r.unlockedDefault, staff: r.unlockedDefault ? 1 : 0, equipLv: 1, speedLv: 1, hasManager: false, job: null };
+      if (typeof parsed.rooms[r.id].hasManager !== 'boolean') parsed.rooms[r.id].hasManager = false;
+    });
+    return { data: parsed, error: null };
   }
+
+  function decodeSaveCode(code) {
+    return decodeSaveCodeWithReason(code).data;
+  }
+
   function autoSave() {
     if (!state) return;
     try {
@@ -414,6 +522,7 @@ window.STARUP_ENGINE = (() => {
     resetViewportScroll();
     document.getElementById('modalTitle').innerHTML = title;
     document.getElementById('modalBody').innerHTML = html;
+    document.getElementById('btnCloseModal').classList.remove('hidden');
     document.getElementById('modalOverlay').classList.remove('hidden');
   }
   function closeModal() {
@@ -498,7 +607,7 @@ window.STARUP_ENGINE = (() => {
     const clientObj = {
       id: cid, slotIdx, slotX: slot.x, slotY: slot.y,
       roomId: targetRoom.id, roomName: targetRoom.name, roomIcon: targetRoom.icon,
-      title, reward, duration, tier, isVIP, stars: tier === 'mega' ? 5 : (isVIP ? 3 : 2),
+      title, reward, duration, tier, isVIP, stars: tier === 'mega' ? 5 : (isVIP ? 3 : 2), penalty: tier === 'rush' ? Math.min(250, Math.round(reward * 0.5)) : 0,
       patience: workCount <= 1 ? 40 : (workCount <= 3 ? 38 : 35), arrived: false
     };
     waitingClients.push(clientObj);
@@ -521,7 +630,7 @@ window.STARUP_ENGINE = (() => {
     const busy = !!rs.job;
     const disabled = state.disabledRoomId === c.roomId;
     const tierTag = c.tier === 'rush'
-      ? '<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#FFEDD5;color:#C2410C;font-weight:900;font-size:1cqw;">⚡ HỎA TỐC (Phạt $300 nếu trễ 17:00)</span>'
+      ? '<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#FFEDD5;color:#C2410C;font-weight:900;font-size:1cqw;">⚡ HỎA TỐC (Trễ hạn: phạt ${FIN.fmtMoney(c.penalty || Math.min(250, Math.round(c.reward * 0.5)))} & −2 ★)</span>'
       : (c.tier === 'mega' ? '<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#EDE9FE;color:#6D28D9;font-weight:900;font-size:1cqw;">🌟 DỰ ÁN LỚN (x2.1 Thưởng)</span>' : '');
 
     openModal(`${c.isVIP ? '💎 Hợp Đồng VIP' : '📋 Hợp Đồng Mới'}`, `
@@ -573,7 +682,7 @@ window.STARUP_ENGINE = (() => {
     if (rs.job || state.disabledRoomId === c.roomId) return false;
     rs.job = {
       title: c.title, reward: c.reward, tier: c.tier,
-      stars: c.stars || (c.tier === 'mega' ? 5 : (c.isVIP ? 3 : 2)), isVIP: !!c.isVIP,
+      stars: c.stars || (c.tier === 'mega' ? 5 : (c.isVIP ? 3 : 2)), isVIP: !!c.isVIP, penalty: c.penalty || (c.tier === 'rush' ? Math.min(250, Math.round(c.reward * 0.5)) : 0),
       progress: 0, duration: c.duration, issue: null, issueChecked: false, ready: false
     };
     AUD.playSFX('click');
@@ -736,6 +845,7 @@ window.STARUP_ENGINE = (() => {
       const pctInt = Math.min(100, Math.floor(rs.job.progress));
       if (pctEl) pctEl.textContent = (rs.job.tier === 'rush' ? '⚡ ' : '') + pctInt + '%';
       if (barEl) barEl.style.width = pctInt + '%';
+      if (state.selectedRoom === rc.id) { const dp = document.getElementById('drJobPct'); const db = document.getElementById('drJobBar'); if (dp) dp.textContent = pctInt + '%'; if (db) db.style.width = pctInt + '%'; }
     });
     waitingClients.forEach(c => {
       if (!c.arrived) return;
@@ -870,8 +980,8 @@ window.STARUP_ENGINE = (() => {
         } else {
           const pill = document.createElement('div');
           pill.className = 'work-progress-pill';
-          pill.style.left = px + '%';
-          pill.style.top = (py + 2) + '%';
+          pill.style.left = rc.chipPos.x + '%';
+          pill.style.top = (rc.chipPos.y + 5.5) + '%';
           pill.innerHTML = `
             <div id="prog-txt-${rc.id}" style="font-size:0.88cqw;font-weight:800;color:#4A3426;text-align:center;">${j.tier === 'rush' ? '⚡ ' : ''}${Math.floor(j.progress)}%</div>
             <div class="work-progress-bar"><div id="prog-bar-${rc.id}" class="work-progress-fill" style="width:${Math.min(100, Math.floor(j.progress))}%"></div></div>
@@ -965,6 +1075,18 @@ window.STARUP_ENGINE = (() => {
     document.getElementById('drStarsRow').textContent = '★'.repeat(rs.equipLv) + '☆'.repeat(5 - rs.equipLv);
     document.getElementById('drStatVal').textContent = curReward > 0 ? FIN.fmtMoney(curReward) : 'Hỗ trợ';
     document.getElementById('drStatCost').textContent = '-' + FIN.fmtMoney(dailyCost);
+    const jobBox = document.getElementById('drJobBox');
+    if (jobBox) {
+      if (rs.job) {
+        const pct = Math.min(100, Math.floor(rs.job.progress || 0));
+        jobBox.classList.remove('hidden');
+        document.getElementById('drJobTitle').textContent = rs.job.ready ? '✅ Sẵn sàng bàn giao: ' + rs.job.title : '📋 ' + rs.job.title;
+        document.getElementById('drJobPct').textContent = pct + '%';
+        document.getElementById('drJobBar').style.width = pct + '%';
+      } else {
+        jobBox.classList.add('hidden');
+      }
+    }
     
 
     document.getElementById('upStaffSub').textContent = `${rs.staff}/${rc.maxStaff}`;
@@ -1062,26 +1184,29 @@ window.STARUP_ENGINE = (() => {
     const workRooms = CFG.ROOMS.filter(r => r.baseReward > 0 && state.rooms[r.id].unlocked);
     const targetRoom = workRooms[Math.floor(Math.random() * workRooms.length)] || CFG.ROOMS[1];
 
-    const pool = ['power_outage', 'staff_sick', 'tax_audit', 'macro_wave'];
+    const pool = ['staff_sick', 'tax_audit', 'macro_wave'];
+    if ((state.day - (state.lastPowerOutageDay || -10)) >= 6) pool.push('power_outage');
     const kind = pool[Math.floor(Math.random() * pool.length)];
     AUD.playSFX('alert');
 
     if (kind === 'power_outage') {
+      state.lastPowerOutageDay = state.day;
+      const fixCost = state.day <= 5 ? 150 : 280;
       openModal(`⚡ Biến Cố: Chập điện tại ${targetRoom.name}!`, `
-        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Đường dây tại <strong>${targetRoom.name}</strong> vừa gặp sự cố. Nếu không sửa ngay, phòng này sẽ <strong>ngừng hoạt động</strong> trong hôm nay!</p>
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Đường dây tại <strong>${targetRoom.name}</strong> vừa gặp sự cố. Nếu không sửa ngay, phòng này sẽ <strong>tạm ngừng</strong> trong hôm nay (đơn đang chạy sẽ được giữ lại).</p>
         <div style="display:flex;flex-direction:column;gap:0.7cqw;">
-          <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Chi $280 gọi thợ sửa ngay lập tức</button>
+          <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Chi $${fixCost} gọi thợ sửa ngay lập tức</button>
           <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;text-align:left;">B. Tạm đóng ${targetRoom.name} hôm nay (tiết kiệm tiền)</button>
         </div>
       `);
       document.getElementById('evA').onclick = () => {
-        if (state.money < 280) return showToast('Không đủ $280 tiền mặt — hãy chọn phương án B!');
-        state.money -= 280; closeModal(); showToast(`${TICK_SVG}Đã sửa xong sự cố điện tại ${targetRoom.name}!`); renderHUD();
+        if (state.money < fixCost) return showToast(`Không đủ $${fixCost} tiền mặt — hãy chọn phương án B!`);
+        state.money -= fixCost; closeModal(); showToast(`${TICK_SVG}Đã sửa xong sự cố điện tại ${targetRoom.name}!`); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
         state.disabledRoomId = targetRoom.id;
         state.activeEventTag = `🔧 ${targetRoom.name} tạm ngừng do chập điện`;
-        state.rooms[targetRoom.id].job = null;
+        // Pause room without deleting running job so progress is preserved!
         closeModal(); showToast(`⚡ ${targetRoom.name} đã tạm khóa trên bản đồ!`); renderHUD(); renderMapOverlays();
       };
     } else if (kind === 'staff_sick') {
@@ -1162,14 +1287,20 @@ window.STARUP_ENGINE = (() => {
       }
     });
 
-    // Check unfinished Rush contracts at 17:00 -> Real penalty!
+    // Unfinished Normal/Mega jobs are KEPT into the next day; only unfinished Rush jobs incur fair penalty and are reported explicitly!
     let rushPenalty = 0;
+    let rushStarsLost = 0;
+    let keptJobsCount = 0;
     CFG.ROOMS.forEach(rc => {
       const rs = state.rooms[rc.id];
-      if (rs.job && rs.job.tier === 'rush' && !rs.job.ready) {
-        rushPenalty += 300;
-        state.stars = Math.max(0, state.stars - 3);
+      if (!rs.job) return;
+      if (rs.job.tier === 'rush' && !rs.job.ready) {
+        rushPenalty += (rs.job.penalty || Math.min(250, Math.round(rs.job.reward * 0.5)));
+        rushStarsLost += 2;
+        state.stars = Math.max(0, state.stars - 2);
         rs.job = null;
+      } else if (!rs.job.ready) {
+        keptJobsCount += 1;
       }
     });
     state.dayPenalty = rushPenalty;
@@ -1233,22 +1364,9 @@ window.STARUP_ENGINE = (() => {
     renderHUD();
 
     if (state.debtDays >= 2 || state.money < -3000) {
-      AUD.playSFX('alert');
-      openModal('💥 Tuyên Bố Phá Sản — Game Over', `
-        <div style="text-align:center;padding:0.8cqw 0;">
-          <div style="font-size:3cqw;">🏦</div>
-          <div style="font-size:1.5cqw;font-weight:900;color:#DC2626;margin-top:0.3cqw;">${state.companyName} đã mất khả năng thanh toán!</div>
-          <div style="background:#FAF6F0;border-radius:1.1cqw;padding:1cqw;border:0.12cqw solid #DFD2C1;text-align:left;margin:0.9cqw 0 1.1cqw 0;">
-            <div>CEO: <strong>${state.ceoName}</strong> · Trụ vững: <strong>${state.day} ngày</strong></div>
-            <div>Hợp đồng hoàn thành: <strong>${state.contractsDone} đơn</strong> · Đỉnh tài sản: <strong>${FIN.fmtMoney(state.peakNetWorth)}</strong></div>
-          </div>
-          <button id="btnRestartAfterBankrupt" type="button" style="width:100%;padding:0.95cqw;border-radius:1cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;">🔄 Tái Khởi Nghiệp (Ngày 1)</button>
-        </div>
-      `);
-      document.getElementById('btnRestartAfterBankrupt').onclick = () => {
-        try { localStorage.removeItem(CFG.SAVE_KEY); } catch (e) {}
-        closeModal(); showIntroScreen();
-      };
+      state.isBankrupt = true;
+      autoSave();
+      showBankruptcyScreen();
       return;
     }
 
@@ -1261,13 +1379,14 @@ window.STARUP_ENGINE = (() => {
         ${(flexInt + fixedInt) > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Lãi tiết kiệm ngân hàng</span><strong style="color:#059669;">+${FIN.fmtMoney(flexInt + fixedInt)}</strong></div>` : ''}
         <div style="display:flex;justify-content:space-between;"><span>Thuê mặt bằng & Lương NV ${savedCost > 0 ? `<em style="color:#059669;">(P.Tài Chính giảm ${FIN.fmtMoney(savedCost)})</em>` : ''}</span><strong style="color:#DC2626;">-${FIN.fmtMoney(finalOpCost)}</strong></div>
         ${loanPayment > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Trả góp Ngân hàng</span><strong style="color:#DC2626;">-${FIN.fmtMoney(loanPayment)}</strong></div>` : ''}
-        ${rushPenalty > 0 ? `<div style="display:flex;justify-content:space-between;"><span>⚡ Phạt trễ hạn Đơn Hỏa Tốc</span><strong style="color:#DC2626;">-${FIN.fmtMoney(rushPenalty)}</strong></div>` : ''}
+        ${rushPenalty > 0 ? `<div style="display:flex;justify-content:space-between;"><span>⚡ Hủy đơn Hỏa Tốc trễ hạn (−${rushStarsLost} ★)</span><strong style="color:#DC2626;">-${FIN.fmtMoney(rushPenalty)}</strong></div>` : ''}
         ${investorShare > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🤝 Chia lãi Nhà đầu tư (${state.investorEquity}%)</span><strong style="color:#C2410C;">-${FIN.fmtMoney(investorShare)}</strong></div>` : ''}
         <div style="display:flex;justify-content:space-between;padding-top:0.55cqw;border-top:0.12cqw solid #D8C7B2;font-weight:900;font-size:1.35cqw;">
           <span>Số dư tiền mặt hiện tại</span>
           <span style="color:${state.money >= 0 ? '#059669' : '#DC2626'};">${FIN.fmtMoney(state.money)}</span>
         </div>
       </div>
+      ${keptJobsCount > 0 ? `<div style="margin-top:0.65cqw;padding:0.55cqw 0.85cqw;border-radius:0.85cqw;background:#EFF6FF;color:#1E40AF;font-weight:700;font-size:1.05cqw;">📋 Có ${keptJobsCount} hợp đồng đang làm dở được giữ nguyên sang Ngày ${state.day + 1}.</div>` : ''}
       ${state.money < 0 ? `<div style="margin-top:0.75cqw;padding:0.7cqw;border-radius:0.9cqw;background:#FEF2F2;color:#B91C1C;font-weight:800;">⚠️ CẢNH BÁO NỢ (1/2 NGÀY): Hãy bán cổ phiếu, rút tiết kiệm hoặc chạy đơn gấp ngày mai!</div>` : ''}
       <div style="display:flex;gap:0.75cqw;margin-top:1cqw;">
         <button id="btnStayNight" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">🛠️ Ở lại nâng cấp</button>
@@ -1278,7 +1397,38 @@ window.STARUP_ENGINE = (() => {
     document.getElementById('btnGoNextDay').onclick = startNextDay;
   }
 
+  function showBankruptcyScreen() {
+    AUD.playSFX('alert');
+    const sharePct = EMP.getMarketShare(state);
+    openModal('💥 Tuyên Bố Phá Sản — Kết Thúc', `
+      <div style="text-align:center;padding:0.6cqw 0;">
+        <div style="font-size:2.8cqw;">🏦</div>
+        <div style="font-size:1.48cqw;font-weight:900;color:#DC2626;margin-top:0.25cqw;">${state.companyName} đã phá sản (âm quỹ quá hạn)!</div>
+        <p style="font-size:1.05cqw;color:#6B5443;margin:0.35cqw 0 0.85cqw 0;">Ngân hàng đã niêm phong văn phòng. Bạn có thể xem lại thành tích hành trình hoặc bắt đầu khởi nghiệp lại từ Ngày 1.</p>
+        <div style="background:#FAF6F0;border-radius:1.1cqw;padding:0.95cqw;border:0.12cqw solid #DFD2C1;text-align:left;margin-bottom:1cqw;">
+          <div>CEO: <strong>${state.ceoName}</strong> · Trụ vững: <strong>${state.day} ngày</strong></div>
+          <div>Hợp đồng hoàn thành: <strong>${state.contractsDone} đơn</strong> · Đỉnh tài sản: <strong>${FIN.fmtMoney(state.peakNetWorth)}</strong> · Thị phần: <strong>${sharePct}%</strong></div>
+        </div>
+        <div style="display:flex;gap:0.7cqw;">
+          <button id="btnViewBankruptCert" type="button" style="flex:1;padding:0.9cqw;border-radius:1cqw;background:#EFE6DA;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">🏆 Xem thành tích</button>
+          <button id="btnRestartAfterBankrupt" type="button" style="flex:1.4;padding:0.9cqw;border-radius:1cqw;background:#4A3426;color:#FFFDF9;font-weight:900;border:none;cursor:pointer;">🔄 Chơi lại từ đầu</button>
+        </div>
+      </div>
+    `);
+    document.getElementById('btnCloseModal').classList.add('hidden');
+    document.getElementById('btnViewBankruptCert').onclick = () => {
+      QST.downloadIPOCertificatePNG(state, sharePct);
+      showToast(`${TICK_SVG}Đã tải ảnh thành tích hành trình PNG!`);
+    };
+    document.getElementById('btnRestartAfterBankrupt').onclick = () => {
+      try { localStorage.removeItem(CFG.SAVE_KEY); } catch (e) {}
+      document.getElementById('btnCloseModal').classList.remove('hidden');
+      closeModal(); showIntroScreen();
+    };
+  }
+
   function startNextDay() {
+    if (state && state.isBankrupt) { showBankruptcyScreen(); return; }
     closeModal();
     state.day += 1;
     state.minutes = 474;
@@ -1533,7 +1683,7 @@ window.STARUP_ENGINE = (() => {
           <strong>2. Khôi phục:</strong> Dán mã <code>STARUP-...</code> vào ô dưới rồi bấm <em>Khôi phục</em>.
         </p>
         <div style="display:flex;gap:0.5cqw;margin-bottom:0.75cqw;">
-          <textarea id="saveCodeOut" readonly rows="2" style="flex:1;padding:0.5cqw 0.75cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-family:monospace;font-size:0.92cqw;background:#FFFDF9;color:#4A3426;resize:none;word-break:break-all;">${code}</textarea>
+          <div style="flex:1;display:flex;flex-direction:column;gap:0.25cqw;"><textarea id="saveCodeOut" readonly rows="2" style="width:100%;padding:0.5cqw 0.75cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-family:monospace;font-size:0.92cqw;background:#FFFDF9;color:#4A3426;resize:none;word-break:break-all;">${code}</textarea><span style="font-size:0.92cqw;color:#047857;font-weight:800;">Độ dài mã: ${code.length} ký tự (rút gọn an toàn)</span></div>
           <button id="btnCopyCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">📋 Sao chép</button>
         </div>
         <div style="display:flex;gap:0.5cqw;">
@@ -1580,8 +1730,9 @@ window.STARUP_ENGINE = (() => {
       showToast(`${TICK_SVG}Đã sao chép mã khôi phục!`);
     };
     document.getElementById('btnRestoreCode').onclick = () => {
-      const decoded = decodeSaveCode(document.getElementById('saveCodeIn').value);
-      if (!decoded) return showToast('❌ Mã khôi phục không hợp lệ!');
+      const res = decodeSaveCodeWithReason(document.getElementById('saveCodeIn').value);
+      if (!res.data) return showToast('❌ ' + res.error);
+      const decoded = res.data;
       state = decoded; waitingClients = []; agents = [];
       applyBranchMap(); rebuildStaffAgents(false); autoSave(); closeModal(); renderHUD(); renderMapOverlays(); renderTutorial();
       showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day}!`);
@@ -1967,8 +2118,9 @@ window.STARUP_ENGINE = (() => {
         <button id="btnConfirmIntroRestore" type="button" style="width:100%;padding:0.85cqw;border-radius:0.95cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Khôi phục & Vào Game</button>
       `);
       document.getElementById('btnConfirmIntroRestore').onclick = () => {
-        const decoded = decodeSaveCode(document.getElementById('introCodeInp').value);
-        if (!decoded) return showToast('❌ Mã không hợp lệ!');
+        const res = decodeSaveCodeWithReason(document.getElementById('introCodeInp').value);
+        if (!res.data) return showToast('❌ ' + res.error);
+        const decoded = res.data;
         state = decoded; closeModal(); beginGameplay(false);
       };
     };
@@ -1992,10 +2144,12 @@ window.STARUP_ENGINE = (() => {
     } else {
       // Lỗi N1 Rescue: If loaded save was stuck near/past closing time (e.g. 17:55 overtime), smoothly finish & open End-of-Day report!
       const closeMin = state.overtimeActive ? 1080 : 1020;
+      if (state.isBankrupt) { showBankruptcyScreen(); return; }
       if (!state.dailyClosed && ((state.overtimeActive && state.minutes >= 1074) || state.minutes >= closeMin)) {
         state.minutes = Math.max(state.minutes, closeMin + 1);
         lastPhase = 'night';
         renderHUD();
+        showToast(`🔧 Đã cứu hồ sơ đang kẹt ở Ngày ${state.day} — mở bảng chốt sổ Ngày ${state.day}!`);
         processEndOfDay();
       }
     }

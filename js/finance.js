@@ -74,10 +74,22 @@ window.STARUP_FINANCE = (() => {
       if (state.loan) {
         const remain = state.loan.dailyPay * state.loan.daysLeft;
         body = `
-          <div style="padding:1.1cqw;border-radius:1.1cqw;background:#FEF2F2;border:0.14cqw solid #FECACA;">
-            <div style="font-weight:900;color:#991B1B;font-size:1.25cqw;">Khoản vay đang chạy: ${state.loan.name}</div>
-            <div style="margin-top:0.35cqw;color:#7F1D1D;">Trả góp lúc 17:00: <strong>${fmtMoney(state.loan.dailyPay)}/ngày</strong> (còn ${state.loan.daysLeft} ngày · Tổng ${fmtMoney(remain)})</div>
-            <button id="btnPayoffLoan" type="button" style="margin-top:0.8cqw;padding:0.62cqw 1.2cqw;border-radius:0.85cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Tất toán sớm (${fmtMoney(remain)})</button>
+          <div style="padding:1cqw 1.1cqw;border-radius:1.1cqw;background:#FEF2F2;border:0.14cqw solid #FECACA;margin-bottom:0.75cqw;">
+            <div style="font-weight:900;color:#991B1B;font-size:1.22cqw;">Khoản vay đang chạy: ${state.loan.name}</div>
+            <div style="margin-top:0.3cqw;color:#7F1D1D;">Trả góp lúc 17:00: <strong>${fmtMoney(state.loan.dailyPay)}/ngày</strong> (còn ${state.loan.daysLeft} ngày · Tổng ${fmtMoney(remain)})</div>
+            <div style="margin-top:0.35cqw;font-size:1.0cqw;color:#9A3412;font-weight:700;">ℹ️ Quy định ngân hàng: Chỉ được giữ 1 khoản vay tại một thời điểm — hãy trả hết hoặc bấm Tất toán sớm để vay gói mới.</div>
+            <button id="btnPayoffLoan" type="button" style="margin-top:0.7cqw;padding:0.58cqw 1.15cqw;border-radius:0.85cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Tất toán sớm (${fmtMoney(remain)})</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0.55cqw;opacity:0.7;">
+            ${CFG.LOANS.map(l => `
+              <div style="padding:0.7cqw 0.95cqw;border-radius:0.95cqw;border:0.12cqw solid #E7E0D8;background:#F5F2EE;display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
+                <div>
+                  <div style="font-weight:800;color:#4A3426;">${l.name} — <span style="color:#059669;">${fmtMoney(l.amount)}</span></div>
+                  <div style="font-size:0.96cqw;color:#7C6350;">${l.desc}</div>
+                </div>
+                <span style="padding:0.45cqw 0.8cqw;border-radius:0.75cqw;background:#D6CCC0;color:#5C4636;font-weight:800;font-size:0.96cqw;white-space:nowrap;">🔒 Đang có nợ</span>
+              </div>
+            `).join('')}
           </div>
         `;
       } else {

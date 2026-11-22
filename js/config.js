@@ -79,7 +79,7 @@ window.STARUP_CONFIG = {
       id: 'finance', name: 'Phòng Tài Chính', icon: '💹', shortPerk: 'Giảm 15–30% chi phí', poly: 'polygon(57% 63%, 66% 72%, 59% 83%, 50% 73%)', plaquePos: { x: 58, y: 73 },
       unlockedDefault: false, unlockCost: 1600,
       chipPos: { x: 58, y: 67 }, lockBox: { x: 57, y: 76, w: 16, h: 16 },
-      deskNodes: ['financeDesk'], baseReward: 220, baseDuration: 15, dailyRent: 70,
+      deskNodes: ['financeDesk'], baseReward: 220, baseDuration: 11, dailyRent: 70,
       staffSalary: 80, maxStaff: 2,
       note: 'Giảm 15–30% chi phí vận hành, mở Dự báo Chứng khoán & chống phạt Thuế!'
     },
@@ -146,7 +146,7 @@ window.STARUP_CONFIG = {
 
   FUNDING_ROUNDS: [
     { id: 'fund_angel', name: 'Nhà Đầu Tư Thiên Thần', icon: '🤝', amount: 2000, equity: 10, reqDay: 3, reqStars: 15, reqRooms: 3, reqRoomId: null, desc: 'Nhận ngay $2,000 không cần trả góp · Chia 10% tiền lời hằng ngày.' },
-    { id: 'fund_seed', name: 'Quỹ Khởi Nghiệp', icon: '🌱', amount: 6000, equity: 15, reqDay: 6, reqStars: 40, reqRooms: 4, reqRoomId: 'finance', desc: 'Nhận ngay $6,000 mở rộng nhanh · Chia 15% tiền lời hằng ngày. Cần P.Tài Chính.' },
+    { id: 'fund_seed', name: 'Quỹ Khởi Nghiệp', icon: '🌱', amount: 6000, equity: 15, reqDay: 6, reqStars: 15, reqRooms: 4, reqRoomId: 'finance', desc: 'Nhận ngay $6,000 mở rộng nhanh · Chia 15% tiền lời hằng ngày. Cần P.Tài Chính.' },
     { id: 'fund_corp', name: 'Tập Đoàn Đầu Tư', icon: '🏛️', amount: 15000, equity: 20, reqDay: 9, reqStars: 75, reqRooms: 5, reqRoomId: 'tech', desc: 'Nhận ngay $15,000 bệ phóng IPO · Chia 20% tiền lời hằng ngày. Cần P.Kỹ Thuật.' }
   ],
 
@@ -158,7 +158,7 @@ window.STARUP_CONFIG = {
   ],
 
   BRANCHES: [
-    { id: 'hcm', mapSrc: 'assets/office_day.jpg', name: 'Trụ sở 1: TP.HCM (Startup)', mult: 1, dividend: 0, reqVal: 0, desc: 'Văn phòng 7 phòng ban — Nơi khởi nghiệp đầu tiên.' },
+    { id: 'hcm', mapSrc: 'assets/office_day.jpg', name: 'Trụ sở 1: TP.HCM (Startup)', mult: 1, dividend: 0, reqVal: 0, desc: 'Văn phòng 6 phòng ban — Nơi khởi nghiệp đầu tiên.' },
     { id: 'tokyo', mapSrc: 'assets/office_tokyo.jpg', name: 'Chi nhánh 2: Tokyo (Tập đoàn Công nghệ)', mult: 2, dividend: 2200, reqVal: 35000, desc: 'Mở sau khi IPO • Nhân đôi giá trị hợp đồng + $2,200 cổ tức/ngày.' },
     { id: 'ny', mapSrc: 'assets/office_ny.jpg', name: 'Chi nhánh 3: New York (Đế chế Toàn cầu)', mult: 4, dividend: 6500, reqVal: 150000, desc: 'Đỉnh cao tập đoàn toàn cầu • Nhân 4 giá hợp đồng + $6,500 cổ tức/ngày.' }
   ],
