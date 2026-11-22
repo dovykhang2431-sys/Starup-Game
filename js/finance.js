@@ -48,7 +48,7 @@ window.STARUP_FINANCE = (() => {
   function buildFinanceModalHTML(state, activeTab) {
     const CFG = window.STARUP_CONFIG;
     const hasFinRoom = state.rooms.finance && state.rooms.finance.unlocked;
-    const unlockedCount = CFG.ROOMS.filter(r => state.rooms[r.id] && state.rooms[r.id].unlocked).length;
+    const unlockedCount = getUnlockedDeptCount(state);
     const investorEq = state.investorEquity || 0;
     const founderEq = 100 - investorEq;
 
@@ -158,7 +158,7 @@ window.STARUP_FINANCE = (() => {
             const lockTxt = missingParts.join(' · ');
             const reqBadges = [
               `<span style="color:${okDay ? '#059669' : '#B45309'};font-weight:800;">${okDay ? '✓' : '•'} Ngày ${f.reqDay}</span>`,
-              `<span style="color:${okRooms ? '#059669' : '#B45309'};font-weight:800;">${okRooms ? '✓' : '•'} ${f.reqRooms} phòng</span>`,
+              `<span style="color:${okRooms ? '#059669' : '#B45309'};font-weight:800;">${okRooms ? '✓' : '•'} ${unlockedCount}/${f.reqRooms} phòng</span>`,
               `<span style="color:${okStars ? '#059669' : '#B45309'};font-weight:800;">${okStars ? '✓' : '•'} ${f.reqStars} ★</span>`
             ];
             if (f.reqRoomId) {
@@ -247,5 +247,9 @@ window.STARUP_FINANCE = (() => {
     return tabBar + body;
   }
 
-  return { fmtMoney, updateStockPrices, getPortfolioValue, getNetWorth, getBuyback5Cost, buildFinanceModalHTML };
+  function getUnlockedDeptCount(state) {
+    return CFG.ROOMS.filter(r => r.id !== 'lobby' && state.rooms[r.id] && state.rooms[r.id].unlocked).length;
+  }
+
+  return { fmtMoney, updateStockPrices, getPortfolioValue, getNetWorth, getBuyback5Cost, getUnlockedDeptCount, buildFinanceModalHTML };
 })();

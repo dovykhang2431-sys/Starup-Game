@@ -127,7 +127,7 @@ window.STARUP_EMPIRE = (() => {
             ${state.ipoDone ? `${tickSvg}ĐÃ LÊN SÀN IPO — Mã [${state.ticker}]` : `🎯 Mục tiêu IPO của ${state.companyName}`}
           </div>
           <div style="font-size:1.05cqw;color:#6B5443;margin-top:0.3cqw;">
-            Tài sản ròng: <strong>${FIN.fmtMoney(nw)} / $30,000</strong> · Uy tín: <strong>${state.stars} / 80 ★</strong> · Phòng ban: <strong>${deptRooms.filter(r => state.rooms[r.id] && state.rooms[r.id].unlocked).length}/${deptRooms.length}</strong>
+            Tài sản ròng: <strong>${FIN.fmtMoney(nw)} / $30,000</strong> · Uy tín: <strong>${state.stars} / 80 ★</strong> · Phòng ban: <strong>${FIN.getUnlockedDeptCount(state)}/${deptRooms.length}</strong>
           </div>
           ${!state.ipoDone ? `
             <button id="btnDoIPO" type="button" ${canIPO ? '' : 'disabled'} style="margin-top:0.75cqw;width:100%;padding:0.78cqw;border-radius:0.9cqw;background:${canIPO ? '#D97706' : '#D6CCC0'};color:#fff;font-weight:800;border:none;cursor:${canIPO ? 'pointer' : 'not-allowed'};">

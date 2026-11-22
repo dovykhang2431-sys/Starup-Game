@@ -139,9 +139,9 @@ window.STARUP_CONFIG = {
   ],
 
   LOANS: [
-    { id: 'loan_small', name: 'Tín Chấp Khởi Nghiệp', amount: 800, dailyPay: 190, days: 5, reqDay: 2, reqStars: 0, reqFinance: false, reqRooms: 2, desc: 'Trả $190/ngày × 5 ngày · Mở ngay từ Ngày 2' },
-    { id: 'loan_mid', name: 'Vay Doanh Nghiệp Nhỏ', amount: 3000, dailyPay: 720, days: 5, reqDay: 4, reqStars: 25, reqFinance: true, reqRooms: 3, desc: 'Trả $720/ngày × 5 ngày · Cần Ngày 4, P.Tài Chính & ≥ 25 ★' },
-    { id: 'loan_ipo', name: 'Tín Dụng Tăng Trưởng', amount: 10000, dailyPay: 2500, days: 5, reqDay: 7, reqStars: 55, reqFinance: true, reqRooms: 5, desc: 'Trả $2,500/ngày × 5 ngày · Cần Ngày 7, ≥ 5 phòng & ≥ 55 ★' }
+    { id: 'loan_small', name: 'Tín Chấp Khởi Nghiệp', amount: 800, dailyPay: 190, days: 5, reqDay: 2, reqStars: 0, reqFinance: false, reqRooms: 1, desc: 'Trả $190/ngày × 5 ngày · Mở ngay từ Ngày 2' },
+    { id: 'loan_mid', name: 'Vay Doanh Nghiệp Nhỏ', amount: 3000, dailyPay: 720, days: 5, reqDay: 4, reqStars: 25, reqFinance: true, reqRooms: 2, desc: 'Trả $720/ngày × 5 ngày · Cần Ngày 4, P.Tài Chính & ≥ 25 ★' },
+    { id: 'loan_ipo', name: 'Tín Dụng Tăng Trưởng', amount: 10000, dailyPay: 2500, days: 5, reqDay: 7, reqStars: 55, reqFinance: true, reqRooms: 4, desc: 'Trả $2,500/ngày × 5 ngày · Cần Ngày 7, ≥ 4 phòng ban & ≥ 55 ★' }
   ],
 
   FUNDING_ROUNDS: [
