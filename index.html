@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>STARUP — Game Kinh Doanh Khởi Nghiệp 16:9</title>
+  <meta name="theme-color" content="#4A3426" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="STARUP" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="css/starup.css" />
+</head>
+<body>
+
+  <!-- Portrait Rotate Lock Overlay -->
+  <div id="rotateLock">
+    <div class="phone-tilt-icon">📱</div>
+    <h2 style="margin:0;font-size:20px;font-weight:900;color:#3D2B1F;">Xoay ngang điện thoại để chơi STARUP</h2>
+    <p style="margin:0;font-size:13px;color:#6B5443;max-width:300px;line-height:1.5;">
+      Game được thiết kế chuẩn màn hình ngang 16:9 để bạn điều hành toàn bộ 6 phòng ban thật rõ ràng.
+    </p>
+    <button id="btnForceLandscape" type="button" style="padding:12px 22px;border-radius:999px;background:linear-gradient(180deg,#F59E0B,#D97706);color:#FFFDF9;font-weight:900;font-size:14px;border:none;box-shadow:0 4px 0 #92400E;cursor:pointer;">
+      🔄 Bật Toàn Màn Hình Ngang
+    </button>
+    <button id="btnBypassPortrait" type="button" style="background:none;border:none;color:#7C6350;font-size:12px;text-decoration:underline;cursor:pointer;">
+      Vẫn xem ở khung thu nhỏ
+    </button>
+  </div>
+
+  <!-- Main 16:9 Locked Stage -->
+  <div id="appRoot">
+    <div id="gameScreen">
+
+      <div id="stageViewport">
+        <!-- 1. Day & Night Empty Isometric Office Maps -->
+        <img id="dayMapImg" class="map-img" src="assets/office_day.jpg" alt="Văn phòng Starup ban ngày" />
+        <img id="nightMapImg" class="map-img" src="assets/office_night.jpg" alt="Văn phòng Starup ban đêm" />
+        <div id="sunsetOverlay"></div>
+
+        <!-- 2. Walking 3D Chibi Head Tokens Layer -->
+        <div id="agentsLayer" style="position:absolute;inset:0;pointer-events:none;z-index:21;"></div>
+
+        <!-- 3. Warm Blueprint Locks, Room Chips & Active Action Bubbles -->
+        <div id="mapOverlaysLayer" style="position:absolute;inset:0;z-index:24;"></div>
+
+        <!-- 4. Floating Coins -->
+        <div id="coinsLayer" style="position:absolute;inset:0;pointer-events:none;z-index:40;"></div>
+      </div>
+
+      <!-- 5. Top Proportional Tactile HUD -->
+      <div class="hud-top">
+        <div style="display:flex;align-items:center;gap:0.75cqw;">
+          <div class="hud-cream res-pill">
+            <span class="res-badge" style="background:linear-gradient(180deg,#34D399,#059669);color:#fff;">$</span>
+            <span id="hudMoney">900</span>
+            <span style="width:0.13cqw;height:1.65cqw;background:#D8C7B2;"></span>
+            <span class="res-badge" style="background:linear-gradient(180deg,#FDE047,#D97706);color:#451A03;">★</span>
+            <span id="hudStars">10</span>
+            <span style="width:0.13cqw;height:1.65cqw;background:#D8C7B2;"></span>
+            <span id="hudCompanyTag" style="color:#B45309;font-size:1.22cqw;">Nova Tech</span>
+          </div>
+          <!-- News Button (Custom SVG) -->
+          <button id="btnNews" type="button" title="Tin nóng thị trường" class="hud-cream icon-circle">
+            <svg viewBox="0 0 32 32" style="width:100%;height:100%;" fill="none">
+              <rect x="4" y="6" width="24" height="20" rx="4" fill="#FEF3C7" stroke="#B45309" stroke-width="2.2"/>
+              <rect x="8" y="10" width="9" height="6" rx="1.5" fill="#F59E0B"/>
+              <path d="M20 11h4M20 15h4M8 20h16" stroke="#78350F" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="hud-wood clock-pill">
+          <span id="clockIcon">🌅</span>
+          <span id="clockText">N1 · 07:54</span>
+          <button id="btnSpeed" type="button" class="speed-chip">1x</button>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:0.7cqw;">
+          <!-- Trophy Button (Custom SVG) -->
+          <button id="btnTrophy" type="button" title="Nhiệm vụ & Chứng nhận" class="hud-cream icon-circle" style="position:relative;">
+            <span id="trophyPip" class="dock-pip hidden" style="top:-0.25cqw;right:-0.25cqw;">0</span>
+            <svg viewBox="0 0 32 32" style="width:100%;height:100%;" fill="none">
+              <path d="M9 6h14v7a7 7 0 0 1-14 0V6z" fill="#FBBF24" stroke="#92400E" stroke-width="2.2"/>
+              <path d="M9 9H6a3 3 0 0 0 3 4M23 9h3a3 3 0 0 1-3 4" stroke="#B45309" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M16 20v4M11 26h10" stroke="#92400E" stroke-width="2.6" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <!-- Settings Button (Custom SVG) -->
+          <button id="btnSettings" type="button" title="Cài đặt & Mã khôi phục" class="hud-cream icon-circle">
+            <svg viewBox="0 0 32 32" style="width:100%;height:100%;" fill="none">
+              <circle cx="16" cy="16" r="5" fill="#FDE68A" stroke="#6B4E3D" stroke-width="2.4"/>
+              <path d="M16 4v3M16 25v3M4 16h3M25 16h3M7.5 7.5l2.2 2.2M22.3 22.3l2.2 2.2M24.5 7.5l-2.2 2.2M9.7 22.3l-2.2 2.2" stroke="#6B4E3D" stroke-width="2.6" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Active Marketing Campaign & Debt Ribbons -->
+      <div id="mktBanner" class="hidden">📣 Chiến dịch</div>
+      <div id="eventBanner" class="hidden">⚡ Biến cố</div>
+      <div id="debtBanner" class="hidden">⚠️ Âm quỹ</div>
+
+      <!-- Interactive Tutorial Banner -->
+      <div id="tutorialBanner" class="hidden">
+        <span style="font-size:1.85cqw;">💡</span>
+        <div id="tutorialText" style="font-size:1.15cqw;font-weight:800;line-height:1.35;flex:1;">Hướng dẫn</div>
+        <button id="btnSkipTutorial" type="button" style="padding:0.35cqw 0.75cqw;border-radius:0.7cqw;background:#FDE68A;color:#78350F;font-size:1.0cqw;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">Bỏ qua</button>
+      </div>
+
+      <!-- 6. Bottom Glossy 3D Dock Buttons -->
+      <div class="hud-bottom">
+        <div style="display:flex;align-items:center;gap:0.9cqw;">
+          <button id="btnReport" type="button" class="dock-btn dock-report">
+            <span id="reportPip" class="dock-pip hidden">0</span>
+            <svg class="dock-btn-svg" viewBox="0 0 36 36" fill="none">
+              <rect x="7" y="6" width="22" height="25" rx="3.5" fill="#FFFBEB" stroke="#A16207" stroke-width="2.2"/>
+              <rect x="13" y="3.5" width="10" height="5" rx="2" fill="#EAB308" stroke="#A16207" stroke-width="1.8"/>
+              <path d="M12 14h12M12 19.5h12M12 25h8" stroke="#B45309" stroke-width="2.3" stroke-linecap="round"/>
+            </svg>
+            <span class="dock-btn-label">Báo Cáo</span>
+          </button>
+
+          <button id="btnFinance" type="button" class="dock-btn dock-finance">
+            <svg class="dock-btn-svg" viewBox="0 0 36 36" fill="none">
+              <path d="M4 14L18 5l14 9H4z" fill="#10B981" stroke="#065F46" stroke-width="2.2" stroke-linejoin="round"/>
+              <path d="M8 14v12M14 14v12M22 14v12M28 14v12" stroke="#047857" stroke-width="2.8" stroke-linecap="round"/>
+              <rect x="4" y="26" width="28" height="4.5" rx="2" fill="#059669" stroke="#065F46" stroke-width="2"/>
+            </svg>
+            <span class="dock-btn-label">Tài Chính</span>
+          </button>
+
+          <button id="btnMarketing" type="button" class="dock-btn dock-marketing">
+            <svg class="dock-btn-svg" viewBox="0 0 36 36" fill="none">
+              <path d="M7 15h6l12-6v18l-12-6H7a3 3 0 0 1 0-6z" fill="#FB923C" stroke="#9A3412" stroke-width="2.2" stroke-linejoin="round"/>
+              <path d="M11 21l2.5 7.5h4L15.5 21" fill="#FDBA74" stroke="#9A3412" stroke-width="2" stroke-linejoin="round"/>
+              <path d="M28 13c2 1.5 2 8.5 0 10" stroke="#EA580C" stroke-width="2.4" stroke-linecap="round"/>
+            </svg>
+            <span class="dock-btn-label">Marketing</span>
+          </button>
+
+          <button id="btnIPO" type="button" class="dock-btn dock-ipo">
+            <svg class="dock-btn-svg" viewBox="0 0 36 36" fill="none">
+              <circle cx="18" cy="18" r="12" fill="#60A5FA" stroke="#1E40AF" stroke-width="2.2"/>
+              <ellipse cx="18" cy="18" rx="5.5" ry="12" stroke="#DBEAFE" stroke-width="2"/>
+              <path d="M6.5 15h23M6.5 21h23" stroke="#DBEAFE" stroke-width="2"/>
+              <circle cx="27" cy="9" r="4.5" fill="#FBBF24" stroke="#92400E" stroke-width="1.6"/>
+            </svg>
+            <span class="dock-btn-label">Tập Đoàn</span>
+          </button>
+        </div>
+
+        <button id="btnPrimary" type="button" class="primary-cta" style="background:linear-gradient(180deg,#F59E0B,#D97706);">
+          <span id="primaryIcon" style="font-size:1.7cqw;">☕</span>
+          <span id="primaryText">Trà Chiều x2</span>
+        </button>
+      </div>
+
+      <!-- 7. REDESIGNED JUICY ROOM UPGRADE POPUP -->
+      <aside id="roomDrawer" class="upgrade-popup closed">
+        <div class="up-hero">
+          <div style="display:flex;align-items:center;gap:0.85cqw;min-width:0;">
+            <div id="drHeroIcon" class="up-hero-icon">💻</div>
+            <div style="min-width:0;">
+              <div id="drTitle" style="font-size:1.5cqw;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Phòng Kỹ Thuật</div>
+              <div id="drStarsRow" style="font-size:1.05cqw;color:#FDE047;letter-spacing:0.1cqw;margin-top:0.1cqw;">★☆☆☆☆</div>
+            </div>
+          </div>
+          <button id="btnCloseDrawer" type="button" class="up-close-btn">✕</button>
+        </div>
+
+        <div class="up-stats-strip">
+          <div class="up-stat-chip">
+            <span>💰 Giá đơn</span>
+            <strong id="drStatVal" style="color:#059669;">$210</strong>
+          </div>
+          <div class="up-stat-chip">
+            <span>🧾 Chi phí/N</span>
+            <strong id="drStatCost" style="color:#DC2626;">-$120</strong>
+          </div>
+        </div>
+
+        <div class="up-body">
+          <div class="up-card">
+            <div style="min-width:0;">
+              <div style="font-size:1.18cqw;font-weight:900;color:#3D2B1F;">👥 Nhân Sự <span id="upStaffSub" style="font-weight:700;color:#7C6350;font-size:1cqw;">1/2</span></div>
+              <div id="upStaffBar" class="up-seg-bar"></div>
+            </div>
+            <button id="upStaff" type="button" class="up-buy-btn">$500</button>
+          </div>
+
+          <div class="up-card">
+            <div style="min-width:0;">
+              <div style="font-size:1.18cqw;font-weight:900;color:#3D2B1F;">🖥️ Thiết Bị <span id="upEquipSub" style="font-weight:700;color:#7C6350;font-size:1cqw;">Lv.1/5</span></div>
+              <div id="upEquipBar" class="up-seg-bar"></div>
+            </div>
+            <button id="upEquip" type="button" class="up-buy-btn">$300</button>
+          </div>
+
+          <div class="up-card">
+            <div style="min-width:0;">
+              <div style="font-size:1.18cqw;font-weight:900;color:#3D2B1F;">⚡ Tốc Độ <span id="upSpeedSub" style="font-weight:700;color:#7C6350;font-size:1cqw;">Lv.1/5</span></div>
+              <div id="upSpeedBar" class="up-seg-bar"></div>
+            </div>
+            <button id="upSpeed" type="button" class="up-buy-btn">$250</button>
+          </div>
+
+          <div class="up-card" style="background:linear-gradient(180deg,#FFFBEB,#FEF3C7);border-color:#FCD34D;">
+            <div style="min-width:0;">
+              <div style="font-size:1.16cqw;font-weight:900;color:#92400E;">🎖️ Quản Lý Tự Động</div>
+              <div id="upMgrSub" style="font-size:0.92cqw;font-weight:700;color:#B45309;">Cần đủ nhân sự</div>
+            </div>
+            <button id="upMgr" type="button" class="up-buy-btn">$1.5K</button>
+          </div>
+        </div>
+
+        
+      </aside>
+
+      <!-- 8. Sculpted Wood-Header Modal -->
+      <div id="modalOverlay" class="modal-overlay hidden">
+        <div class="modal-card">
+          <div class="modal-header">
+            <span id="modalTitle" style="font-size:1.48cqw;font-weight:900;color:#FFFDF9;">Tiêu đề</span>
+            <button id="btnCloseModal" type="button" class="up-close-btn">✕</button>
+          </div>
+          <div id="modalBody" class="modal-body"></div>
+        </div>
+      </div>
+
+      <!-- 9. Intro Overlay -->
+      <div id="introOverlay">
+        <div id="introContent" class="intro-card"></div>
+      </div>
+
+      <!-- Toast & Auto-Save Indicator -->
+      <div id="toast" class="hud-wood hidden">Thông báo</div>
+      <div id="saveDot">💾 Đã tự lưu</div>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/avatars.js"></script>
+  <script src="js/finance.js"></script>
+  <script src="js/marketing.js"></script>
+  <script src="js/empire.js"></script>
+  <script src="js/quests.js"></script>
+  <script src="js/pwa.js"></script>
+  <script src="js/engine.js"></script>
+  <script>
+    (function lockMobileZoom() {
+      document.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false });
+      document.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false });
+      document.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
+      document.addEventListener('touchstart', function(e) {
+        if (e.touches && e.touches.length > 1) e.preventDefault();
+      }, { passive: false });
+      let lastTap = 0;
+      document.addEventListener('touchend', function(e) {
+        const now = Date.now();
+        if (now - lastTap <= 300) e.preventDefault();
+        lastTap = now;
+      }, { passive: false });
+      document.addEventListener('wheel', function(e) {
+        if (e.ctrlKey) e.preventDefault();
+      }, { passive: false });
+    })();
+  </script>
+</body>
+</html>

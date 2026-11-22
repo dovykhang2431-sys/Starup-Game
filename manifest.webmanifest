@@ -1,0 +1,34 @@
+{
+  "name": "STARUP — Game Kinh Doanh Khởi Nghiệp",
+  "short_name": "STARUP",
+  "description": "Game mô phỏng kinh doanh khởi nghiệp 16:9 ngang: chốt đơn, gọi vốn, đầu tư chứng khoán, sản phẩm riêng, M&A và IPO.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#E2DCD3",
+  "theme_color": "#4A3426",
+  "lang": "vi",
+  "categories": ["games", "simulation"],
+  "icons": [
+    {
+      "src": "assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

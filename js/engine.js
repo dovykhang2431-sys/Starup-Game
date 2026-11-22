@@ -1,0 +1,1910 @@
+window.STARUP_ENGINE = (() => {
+  const CFG = window.STARUP_CONFIG;
+  const AUD = window.STARUP_AUDIO;
+  const AVA = window.STARUP_AVATARS;
+  const FIN = window.STARUP_FINANCE;
+  const MKT = window.STARUP_MARKETING;
+  const EMP = window.STARUP_EMPIRE;
+  const QST = window.STARUP_QUESTS;
+
+  // Custom hand-crafted glossy emerald checkmark SVG harmonized with Starup's cream/wood palette
+  const TICK_SVG = `<span class="starup-tick"><svg viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12.5" fill="#059669" stroke="#FFFDF9" stroke-width="2.2"/><path d="M4.2 12.2A10.2 10.2 0 0 1 23.8 12.2A10.2 7 0 0 0 4.2 12.2Z" fill="#34D399" opacity="0.55"/><path d="M8.5 14.3L12.3 18.1L19.8 10.4" stroke="#FFFDF9" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
+
+  let state = null;
+  let agents = [];
+  let waitingClients = []; // Up to 3 concurrent clients at Reception!
+  let rafId = null;
+  let lastTs = 0;
+  let hudAccum = 0;
+  let activeModalTab = 'loan';
+  let activeReportTab = 'pending';
+  let activeEmpireTab = 'products';
+  let activeTrophyTab = 'quests';
+  let banterCooldown = 5.5;
+  let toastTimer = null;
+  let saveDotTimer = null;
+  let lastOverlaySig = '';
+  let lastDrawerMoney = null;
+
+  const CLIENT_SLOTS = [
+    { node: 'reception', x: 49, y: 45 },
+    { node: 'recLeft',   x: 44, y: 48 },
+    { node: 'recRight',  x: 54, y: 50 }
+  ];
+
+  function createFreshState(ceoName, companyName, ceoAvatar) {
+    const rooms = {};
+    CFG.ROOMS.forEach(r => {
+      rooms[r.id] = {
+        unlocked: r.unlockedDefault,
+        staff: r.unlockedDefault ? 1 : 0,
+        equipLv: 1,
+        speedLv: 1,
+        hasManager: false,
+        job: null
+      };
+    });
+    return {
+      ceoName: ceoName || 'Minh Founder',
+      companyName: companyName || 'Nova Tech',
+      ceoAvatar: ceoAvatar || 'ceo',
+      day: 1,
+      minutes: 474,
+      speed: 1,
+      money: 500,
+      stars: 5,
+      morale: 85,
+      brandAwareness: 8,
+      marketingCampaign: null,
+      activeEventTag: '',
+      disabledRoomId: null,
+      sickStaffRoomId: null,
+      clientRateDebuff: 1,
+      peakNetWorth: 500,
+      contractsDone: 0,
+      debtDays: 0,
+      tutorialStep: 1,
+      dayRevenue: 0,
+      dayPenalty: 0,
+      dailyCompletedJobs: [],
+      eventTriggeredToday: false,
+      overtimeActive: false,
+      happyHourLeft: 0,
+      happyHourCooldown: 0,
+      dailyClosed: false,
+      lastStockHour: 8,
+      ipoDone: false,
+      ticker: '',
+      branchIdx: 0,
+      maxBranchIdx: 0,
+      activeMapIdx: 0,
+      dailyQuests: QST.generateDailyQuests(1),
+      rooms,
+      loan: null,
+      investorEquity: 0,
+      fundingTaken: [],
+      products: {},
+      acquiredRivals: [],
+      savings: { flex: 0, fixed: 0, fixedDaysLeft: 0 },
+      stocks: CFG.STOCKS_INIT.map(s => ({ ...s, history: [...s.history], shares: 0, avgCost: 0, prevPrice: s.price })),
+      newsHint: 'Ngày 1 khởi nghiệp: Chạm vào Khách ở Sảnh Lễ Tân để chốt hợp đồng đầu tiên!'
+    };
+  }
+
+  // ==================== SAVE / LOAD / RECOVERY CODE ====================
+  function encodeSaveCode(st) {
+    try { return 'STARUP-' + btoa(unescape(encodeURIComponent(JSON.stringify(st)))); } catch (e) { return ''; }
+  }
+  function decodeSaveCode(code) {
+    try {
+      const clean = (code || '').trim().replace(/^STARUP-/, '');
+      const parsed = JSON.parse(decodeURIComponent(escape(atob(clean))));
+      if (!parsed || typeof parsed.money !== 'number' || !parsed.rooms) return null;
+      // Migrate older saves missing finance room or morale
+      if (!parsed.rooms.finance) parsed.rooms.finance = { unlocked: false, staff: 0, equipLv: 1, speedLv: 1, job: null };
+      if (typeof parsed.morale !== 'number') parsed.morale = 85;
+      if (!Array.isArray(parsed.dailyCompletedJobs)) parsed.dailyCompletedJobs = [];
+      if (typeof parsed.investorEquity !== 'number') parsed.investorEquity = 0;
+      if (!Array.isArray(parsed.fundingTaken)) parsed.fundingTaken = [];
+      if (!parsed.products) parsed.products = {};
+      if (!Array.isArray(parsed.acquiredRivals)) parsed.acquiredRivals = [];
+      if (!Array.isArray(parsed.dailyQuests)) parsed.dailyQuests = QST.generateDailyQuests(parsed.day || 1);
+      if (typeof parsed.maxBranchIdx !== 'number') parsed.maxBranchIdx = parsed.branchIdx || 0;
+      if (typeof parsed.activeMapIdx !== 'number') parsed.activeMapIdx = parsed.branchIdx || 0;
+      if (typeof parsed.happyHourCooldown !== 'number') parsed.happyHourCooldown = 0;
+      CFG.ROOMS.forEach(r => { if (!parsed.rooms[r.id]) parsed.rooms[r.id] = { unlocked: r.unlockedDefault, staff: r.unlockedDefault ? 1 : 0, equipLv: 1, speedLv: 1, hasManager: false, job: null }; if (typeof parsed.rooms[r.id].hasManager !== 'boolean') parsed.rooms[r.id].hasManager = false; });
+      return parsed;
+    } catch (e) { return null; }
+  }
+  function autoSave() {
+    if (!state) return;
+    try {
+      localStorage.setItem(CFG.SAVE_KEY, encodeSaveCode(state));
+      const dot = document.getElementById('saveDot');
+      if (dot) {
+        dot.style.opacity = '1';
+        clearTimeout(saveDotTimer);
+        saveDotTimer = setTimeout(() => { dot.style.opacity = '0'; }, 1600);
+      }
+    } catch (e) {}
+  }
+  function loadSavedFromStorage() {
+    try {
+      const raw = localStorage.getItem(CFG.SAVE_KEY);
+      return raw ? decodeSaveCode(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  // ==================== PATHFINDING ====================
+  function findPath(startKey, endKey) {
+    if (startKey === endKey) return [endKey];
+    const q = [[startKey]];
+    const vis = new Set([startKey]);
+    while (q.length) {
+      const path = q.shift();
+      const curr = path[path.length - 1];
+      for (const nxt of (CFG.EDGES[curr] || [])) {
+        if (nxt === endKey) return [...path, nxt];
+        if (!vis.has(nxt)) { vis.add(nxt); q.push([...path, nxt]); }
+      }
+    }
+    return [endKey];
+  }
+  function sendAgent(a, targetNode, badge) {
+    const path = findPath(a.node, targetNode);
+    a.path = path.length > 1 ? path.slice(1) : [];
+    if (badge) a.badge = badge;
+  }
+
+  // ==================== STAFF & CLIENT AGENTS (FIXED AFTER-HOURS / LUNCH HIRE!) ====================
+  function rebuildStaffAgents(startOutside = false) {
+    const existingById = {};
+    agents.forEach(a => { existingById[a.id] = a; });
+    const phase = getPhase(state.minutes);
+    const isClosed = phase.key === 'night';
+    const isLunch = phase.key === 'lunch';
+
+    const nextAgents = [];
+    CFG.ROOMS.forEach(rc => {
+      const rs = state.rooms[rc.id];
+      if (!rs.unlocked) return;
+      for (let i = 0; i < rs.staff; i++) {
+        const id = `staff_${rc.id}_${i}`;
+        const deskNode = rc.deskNodes[i % rc.deskNodes.length];
+        if (existingById[id]) {
+          nextAgents.push(existingById[id]);
+        } else {
+          const roleKey = rc.id === 'ceo' ? state.ceoAvatar : (rc.id === 'finance' ? 'ceo' : rc.id);
+          // FIX: If hired after closing (17:00+), stay outside until 08:00 tomorrow!
+          const startNode = (startOutside || isClosed) ? 'outside' : deskNode;
+          const pos = CFG.NODES[startNode];
+          const a = {
+            id, role: 'staff', roomId: rc.id, home: deskNode,
+            roleKey, node: startNode, x: pos.x, y: pos.y,
+            path: [], wait: 1.5 + Math.random() * 2, badge: rc.icon, speed: 12.5, sickToday: false
+          };
+          if (!isClosed && startOutside) {
+            if (isLunch) {
+              const lSpot = state.rooms.pantry.unlocked ? 'pantryBar' : 'sofa';
+              sendAgent(a, lSpot, '🍚');
+            } else {
+              sendAgent(a, deskNode, '⏰');
+            }
+          }
+          nextAgents.push(a);
+        }
+      }
+    });
+
+    // Keep active clients
+    agents.filter(a => a.role === 'client').forEach(ca => nextAgents.push(ca));
+    agents = nextAgents;
+    renderAgentsDOM();
+  }
+
+  function renderAgentsDOM() {
+    const layer = document.getElementById('agentsLayer');
+    layer.innerHTML = '';
+    agents.forEach(a => {
+      const el = document.createElement('div');
+      el.id = 'ag-' + a.id;
+      el.className = 'agent-token idle';
+      el.style.left = a.x + '%';
+      el.style.top = a.y + '%';
+      el.style.opacity = (a.node === 'outside' && a.path.length === 0) ? '0' : '1';
+      el.innerHTML = `
+        <div class="token-head-wrap">
+          ${AVA.renderTokenImg(a.roleKey, a.id)}
+          <span class="token-badge">${a.badge}</span>
+        </div>
+        <div class="token-shadow"></div>
+      `;
+      layer.appendChild(el);
+    });
+  }
+
+  // ==================== UI HELPERS ====================
+  function recordQuestProgress(type, amount) {
+    if (!state || !state.dailyQuests) return;
+    state.dailyQuests.forEach(q => {
+      if (q.type === type && !q.claimed) {
+        q.progress = Math.min(q.target, (q.progress || 0) + amount);
+      }
+    });
+  }
+
+  function applyBranchMap() {
+    if (!state) return;
+    const idx = state.activeMapIdx || 0;
+    const b = CFG.BRANCHES[idx] || CFG.BRANCHES[0];
+    const dayImg = document.getElementById('dayMapImg');
+    if (dayImg && b.mapSrc) dayImg.src = b.mapSrc;
+  }
+
+  function spawnStaffBanter(phaseKey) {
+    const visibleStaff = agents.filter(a => a.role === 'staff' && !a.sickToday && !(a.node === 'outside' && a.path.length === 0));
+    if (!visibleStaff.length) return;
+    const pick = visibleStaff[Math.floor(Math.random() * visibleStaff.length)];
+    const el = document.createElement('div');
+    el.className = 'banter-bubble';
+    el.style.left = pick.x + '%';
+    el.style.top = (pick.y - 6.5) + '%';
+    el.textContent = QST.pickBanter(phaseKey);
+    document.getElementById('coinsLayer').appendChild(el);
+    setTimeout(() => el.remove(), 2750);
+  }
+
+  function openTrophyModal(tab = activeTrophyTab) {
+    activeTrophyTab = tab;
+    const sharePct = EMP.getMarketShare(state);
+    openModal('🏆 Nhiệm Vụ Ngày & Chứng Nhận', QST.buildTrophyAndQuestsHTML(state, activeTrophyTab, sharePct, TICK_SVG));
+    document.querySelectorAll('[data-tr-tab]').forEach(b => { b.onclick = () => openTrophyModal(b.dataset.trTab); });
+    document.querySelectorAll('[data-claim-q]').forEach(b => {
+      b.onclick = () => {
+        const q = state.dailyQuests.find(x => x.id === b.dataset.claimQ);
+        if (!q || q.claimed || q.progress < q.target) return;
+        q.claimed = true;
+        state.money += q.rewardCash;
+        state.stars += q.rewardStars;
+        AUD.playSFX('cash');
+        autoSave(); renderHUD(); openTrophyModal('quests');
+        showToast(`${TICK_SVG}Nhận thưởng nhiệm vụ +${FIN.fmtMoney(q.rewardCash)} & +${q.rewardStars} ★!`);
+      };
+    });
+    const btnDl = document.getElementById('btnDownloadCert');
+    if (btnDl) btnDl.onclick = () => { QST.downloadIPOCertificatePNG(state, sharePct); showToast(`${TICK_SVG}Đã tải ảnh Thẻ Chứng Nhận PNG!`); };
+    const btnCp = document.getElementById('btnCopyCertText');
+    if (btnCp) btnCp.onclick = () => {
+      const txt = `🏆 STARUP — ${state.companyName}${state.ipoDone ? ' [' + state.ticker + ']' : ''} | CEO: ${state.ceoName} | Ngày ${state.day} | Tài sản: ${FIN.fmtMoney(FIN.getNetWorth(state))} | Thị phần: ${sharePct}% | Uy tín: ${state.stars} ★`;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).catch(() => {});
+      } catch (e) {}
+      showToast(`${TICK_SVG}Đã sao chép bảng thành tích!`);
+    };
+  }
+
+  function showToast(htmlMsg) {
+    const t = document.getElementById('toast');
+    t.innerHTML = htmlMsg;
+    t.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.add('hidden'), 2600);
+  }
+  function spawnCoin(x, y, text) {
+    const layer = document.getElementById('coinsLayer');
+    const el = document.createElement('div');
+    el.className = 'coin-pop';
+    el.style.left = x + '%';
+    el.style.top = (y - 3) + '%';
+    el.textContent = text;
+    layer.appendChild(el);
+    setTimeout(() => el.remove(), 1550);
+  }
+  function fmtShort(n) {
+    const sign = n < 0 ? '-' : '';
+    const v = Math.abs(n);
+    if (v >= 1000000) return sign + (v / 1000000).toFixed(1) + 'M';
+    if (v >= 1000) return sign + (v / 1000).toFixed(1) + 'K';
+    return sign + Math.round(v);
+  }
+  function fmtTime(mins) {
+    const h = Math.floor(mins / 60) % 24;
+    const m = Math.floor(mins % 60);
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+  function getPhase(mins) {
+    const closeMin = state.overtimeActive ? 1080 : 1020;
+    if (mins < 480) return { key: 'open', icon: '🌅', night: false };
+    if (mins < 720) return { key: 'morning', icon: '☀️', night: false };
+    if (mins < 780) return { key: 'lunch', icon: '🍚', night: false };
+    if (mins < 960) return { key: 'afternoon', icon: '🌤️', night: false };
+    if (mins < closeMin) return { key: 'sunset', icon: '🌇', night: false };
+    return { key: 'night', icon: '🌙', night: true };
+  }
+  function openModal(title, html) {
+    document.getElementById('modalTitle').innerHTML = title;
+    document.getElementById('modalBody').innerHTML = html;
+    document.getElementById('modalOverlay').classList.remove('hidden');
+  }
+  function closeModal() {
+    document.getElementById('modalOverlay').classList.add('hidden');
+  }
+
+  // ==================== TUTORIAL ====================
+  function renderTutorial() {
+    const banner = document.getElementById('tutorialBanner');
+    if (!state || state.tutorialStep <= 0) { banner.classList.add('hidden'); return; }
+    const steps = {
+      1: 'Bước 1/4: Chạm nút 📋 trên đầu Khách ở Sảnh Lễ Tân để nhận hợp đồng đầu tiên!',
+      2: 'Bước 2/4: Nhân viên đang làm! Nếu hiện ☕/🔧 hãy chạm xử lý, xong bấm 💵 để thu tiền.',
+      3: 'Bước 3/4: Giỏi lắm! Thử 📣 Marketing kéo khách VIP, hoặc mở Khu Pantry ($750) & Phòng Tài Chính ($1,600)!',
+      4: 'Bước 4/4: Chú ý Đơn Hỏa Tốc ⚡ (phải giao trước 17:00) và Biến cố từ Ngày 2 trở đi. Chúc CEO thành công!'
+    };
+    banner.classList.remove('hidden');
+    document.getElementById('tutorialText').textContent = steps[state.tutorialStep] || '';
+  }
+  function advanceTutorial(toStep) {
+    if (state.tutorialStep > 0 && state.tutorialStep < toStep) {
+      state.tutorialStep = toStep;
+      renderTutorial();
+      if (toStep >= 4) {
+        setTimeout(() => {
+          if (state && state.tutorialStep === 4) { state.tutorialStep = 0; renderTutorial(); autoSave(); }
+        }, 7000);
+      }
+    }
+  }
+
+  // ==================== MULTI-CLIENT CONTRACT SPAWNER (NORMAL / RUSH / MEGA) ====================
+  function getUnlockedWorkCount() {
+    return CFG.ROOMS.filter(r => r.baseReward > 0 && state.rooms[r.id] && state.rooms[r.id].unlocked).length;
+  }
+
+  function spawnClientIfNeeded() {
+    const workCount = getUnlockedWorkCount();
+    const maxSlots = workCount <= 1 ? 1 : (workCount <= 3 ? 2 : 3);
+    if (waitingClients.length >= maxSlots) return;
+    const phase = getPhase(state.minutes);
+    if (phase.key === 'night' || phase.key === 'lunch' || phase.key === 'open') return;
+    if (state.minutes > (state.overtimeActive ? 1050 : 990)) return;
+
+    const usedSlots = new Set(waitingClients.map(c => c.slotIdx));
+    let slotIdx = -1;
+    for (let i = 0; i < maxSlots; i++) {
+      if (!usedSlots.has(i)) { slotIdx = i; break; }
+    }
+    if (slotIdx === -1) return;
+
+    const workRooms = CFG.ROOMS.filter(r => r.baseReward > 0 && state.rooms[r.id].unlocked && r.id !== state.disabledRoomId);
+    if (!workRooms.length) return;
+    const targetRoom = workRooms[Math.floor(Math.random() * workRooms.length)];
+    const rs = state.rooms[targetRoom.id];
+    const titles = CFG.CONTRACT_TEMPLATES[targetRoom.id];
+    const title = titles[Math.floor(Math.random() * titles.length)];
+
+    // Contract Tier: Normal, Rush (⚡ x1.75 but penalized if unfinished at 17:00), or Mega (🌟 x2.1 on Day 3+)
+    const camp = state.marketingCampaign;
+    const roll = Math.random();
+    let tier = 'normal';
+    if (state.day >= 3 && roll < 0.22) tier = 'mega';
+    else if (state.day >= 2 && roll < 0.52) tier = 'rush';
+
+    const vipChance = camp ? camp.vipChance : 0.2;
+    const isVIP = tier === 'mega' || Math.random() < vipChance;
+    const tierMult = tier === 'mega' ? 2.1 : (tier === 'rush' ? 1.75 : 1.0);
+    const branchMult = CFG.BRANCHES[state.branchIdx].mult;
+    const starMult = 1 + Math.floor(state.stars / 15) * 0.08;
+    const brandMult = 1 + (state.brandAwareness || 0) * 0.004;
+    const mktMult = camp ? camp.rewardMult : 1;
+    const equipMult = 1 + (rs.equipLv - 1) * 0.35;
+
+    const seaMult = EMP.getSeason(state.day).rewardMult;
+    const reward = Math.round(targetRoom.baseReward * equipMult * starMult * brandMult * mktMult * branchMult * tierMult * seaMult * (isVIP && tier === 'normal' ? 1.35 : 1));
+    const effectiveStaff = Math.max(0.6, rs.staff - (state.sickStaffRoomId === targetRoom.id ? 0.55 : 0));
+    const duration = Math.max(3.5, targetRoom.baseDuration * (tier === 'mega' ? 1.45 : 1) * (1 - (rs.speedLv - 1) * 0.1) / Math.max(0.7, effectiveStaff * 0.85));
+
+    const cid = 'cli_' + Date.now() + '_' + slotIdx;
+    const slot = CLIENT_SLOTS[slotIdx];
+    const clientObj = {
+      id: cid, slotIdx, slotX: slot.x, slotY: slot.y,
+      roomId: targetRoom.id, roomName: targetRoom.name, roomIcon: targetRoom.icon,
+      title, reward, duration, tier, isVIP,
+      patience: workCount <= 1 ? 40 : (workCount <= 3 ? 38 : 35), arrived: false
+    };
+    waitingClients.push(clientObj);
+
+    const cAgent = {
+      id: cid, role: 'client', roleKey: isVIP ? 'vip' : 'client',
+      node: 'outside', x: CFG.NODES.outside.x, y: CFG.NODES.outside.y,
+      path: findPath('outside', slot.node).slice(1),
+      wait: 0, badge: tier === 'rush' ? '⚡' : (tier === 'mega' ? '🌟' : (isVIP ? '💎' : '📋')), speed: 13.5
+    };
+    agents.push(cAgent);
+    renderAgentsDOM();
+    AUD.playSFX('bell');
+  }
+
+  function openContractOfferModal(cid) {
+    const c = waitingClients.find(x => x.id === cid);
+    if (!c) return;
+    const rs = state.rooms[c.roomId];
+    const busy = !!rs.job;
+    const disabled = state.disabledRoomId === c.roomId;
+    const tierTag = c.tier === 'rush'
+      ? '<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#FFEDD5;color:#C2410C;font-weight:900;font-size:1cqw;">⚡ HỎA TỐC (Phạt $300 nếu trễ 17:00)</span>'
+      : (c.tier === 'mega' ? '<span style="padding:0.2cqw 0.6cqw;border-radius:999px;background:#EDE9FE;color:#6D28D9;font-weight:900;font-size:1cqw;">🌟 DỰ ÁN LỚN (x2.1 Thưởng)</span>' : '');
+
+    openModal(`${c.isVIP ? '💎 Hợp Đồng VIP' : '📋 Hợp Đồng Mới'}`, `
+      <div style="background:#FAF6F0;border:0.13cqw solid #DFD2C1;border-radius:1.2cqw;padding:1.2cqw;margin-bottom:1.1cqw;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.6cqw;flex-wrap:wrap;">
+          <div style="font-size:1.48cqw;font-weight:900;color:#3D2B1F;">${c.roomIcon} ${c.title}</div>
+          ${tierTag}
+        </div>
+        <div style="margin-top:0.45cqw;color:#6B5443;">Phòng phụ trách: <strong>${c.roomName}</strong> ${disabled ? '<span style="color:#DC2626;font-weight:800;">(Đang sự cố!)</span>' : (busy ? '<span style="color:#DC2626;font-weight:800;">(Đang bận!)</span>' : '<span style="color:#059669;font-weight:800;">(Sẵn sàng)</span>')}</div>
+        <div style="margin-top:0.55cqw;display:flex;gap:1.5cqw;font-weight:800;">
+          <span style="color:#059669;">Thù lao: ${FIN.fmtMoney(c.reward)}</span>
+          <span style="color:#D97706;">Thưởng: +${c.tier === 'mega' ? 5 : (c.isVIP ? 3 : 2)} ★</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:0.8cqw;">
+        <button id="btnAcceptContract" type="button" ${(busy || disabled) ? 'disabled' : ''} style="flex:2;padding:0.9cqw;border-radius:1cqw;background:${(busy || disabled) ? '#D6CCC0' : 'linear-gradient(180deg,#10B981,#047857)'};color:#fff;font-weight:900;border:none;cursor:${(busy || disabled) ? 'not-allowed' : 'pointer'};display:inline-flex;align-items:center;justify-content:center;">
+          ${disabled ? 'Phòng đang khóa sự cố' : (busy ? 'Phòng đang chạy đơn khác' : `${TICK_SVG}Nhận Hợp Đồng Ngay`)}
+        </button>
+        <button id="btnDeclineContract" type="button" style="flex:1;padding:0.9cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">
+          Từ chối
+        </button>
+      </div>
+    `);
+
+    const btnAcc = document.getElementById('btnAcceptContract');
+    if (btnAcc && !busy && !disabled) {
+      btnAcc.addEventListener('click', () => {
+        if (acceptClientById(c.id)) closeModal();
+      });
+    }
+    document.getElementById('btnDeclineContract').addEventListener('click', () => {
+      AUD.playSFX('click');
+      dismissClient(c.id, false);
+      closeModal();
+    });
+  }
+
+  function dismissClient(cid, happy) {
+    waitingClients = waitingClients.filter(c => c.id !== cid);
+    const ca = agents.find(a => a.id === cid);
+    if (ca) sendAgent(ca, 'outside', happy ? '😄' : '👋');
+    renderMapOverlays();
+  }
+
+  function acceptClientById(cid) {
+    const c = waitingClients.find(x => x.id === cid);
+    if (!c) return false;
+    const rs = state.rooms[c.roomId];
+    if (rs.job || state.disabledRoomId === c.roomId) return false;
+    rs.job = {
+      title: c.title, reward: c.reward, tier: c.tier,
+      stars: c.tier === 'mega' ? 5 : (c.isVIP ? 3 : 2),
+      progress: 0, duration: c.duration, issue: null, issueChecked: false, ready: false
+    };
+    AUD.playSFX('click');
+    showToast(`${TICK_SVG}Đã giao "${c.title}" cho ${c.roomName}!`);
+    dismissClient(c.id, true);
+    advanceTutorial(2);
+    renderHUD();
+    renderMapOverlays();
+    return true;
+  }
+
+  function deliverRoomJob(roomId) {
+    const rc = CFG.ROOMS.find(r => r.id === roomId);
+    const rs = state.rooms[roomId];
+    if (!rc || !rs || !rs.job || !rs.job.ready) return;
+    const j = rs.job;
+    state.money += j.reward;
+    state.dayRevenue += j.reward;
+    state.stars += j.stars;
+    state.contractsDone += 1;
+    recordQuestProgress('contracts', 1);
+    recordQuestProgress('revenue', j.reward);
+    state.morale = Math.min(100, state.morale + 2);
+    state.dailyCompletedJobs.unshift({
+      title: j.title, roomName: rc.name, roomIcon: rc.icon,
+      reward: j.reward, stars: j.stars, time: fmtTime(state.minutes)
+    });
+    const nw = FIN.getNetWorth(state);
+    if (nw > state.peakNetWorth) state.peakNetWorth = nw;
+    rs.job = null;
+    AUD.playSFX('cash');
+    spawnCoin(rc.lockBox.x, rc.lockBox.y, '+' + FIN.fmtMoney(j.reward));
+    showToast(`${TICK_SVG}Bàn giao thành công! +${FIN.fmtMoney(j.reward)} & +${j.stars} ★`);
+    advanceTutorial(3);
+    autoSave();
+    renderHUD();
+    renderMapOverlays();
+  }
+
+  function openReportModal(tab = activeReportTab) {
+    activeReportTab = tab;
+    const pendingList = waitingClients.filter(c => c.arrived);
+    const activeJobs = CFG.ROOMS.filter(rc => state.rooms[rc.id].unlocked && state.rooms[rc.id].job).map(rc => ({ rc, job: state.rooms[rc.id].job }));
+    const doneList = state.dailyCompletedJobs || [];
+
+    const tabs = [
+      { id: 'pending', label: `📥 Chưa nhận (${pendingList.length})` },
+      { id: 'working', label: `⚙️ Đang làm (${activeJobs.length})` },
+      { id: 'done',    label: `📜 Đã xong (${doneList.length})` }
+    ];
+
+    let body = `
+      <div style="display:flex;gap:0.55cqw;margin-bottom:0.95cqw;">
+        ${tabs.map(t => `
+          <button data-rep-tab="${t.id}" type="button" style="flex:1;padding:0.7cqw;border-radius:0.95cqw;font-size:1.1cqw;font-weight:800;border:none;cursor:pointer;${tab === t.id ? 'background:#4A3426;color:#FFFDF9;' : 'background:#EFE6DA;color:#5C4636;'}">
+            ${t.label}
+          </button>
+        `).join('')}
+      </div>
+    `;
+
+    if (tab === 'pending') {
+      if (!pendingList.length) {
+        body += `<div style="text-align:center;padding:2cqw 1cqw;color:#7C6350;">Hiện chưa có khách mới chờ ở Sảnh Lễ Tân.</div>`;
+      } else {
+        body += `<div style="display:flex;flex-direction:column;gap:0.7cqw;">` + pendingList.map(c => {
+          const busy = !!state.rooms[c.roomId].job || state.disabledRoomId === c.roomId;
+          return `
+            <div style="padding:0.85cqw 1cqw;border-radius:1.05cqw;border:0.12cqw solid #DFD2C1;background:#FAF6F0;display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
+              <div>
+                <div style="font-weight:900;color:#3D2B1F;">${c.roomIcon} ${c.title} ${c.tier === 'rush' ? '<span style="color:#C2410C;">(⚡ Hỏa tốc)</span>' : ''}</div>
+                <div style="font-size:1.02cqw;color:#6B5443;">${c.roomName} · <strong style="color:#059669;">${FIN.fmtMoney(c.reward)}</strong> · Chờ ${Math.ceil(c.patience)}s</div>
+              </div>
+              <div style="display:flex;gap:0.45cqw;flex-shrink:0;">
+                <button data-rep-acc="${c.id}" type="button" ${busy ? 'disabled' : ''} style="padding:0.55cqw 0.9cqw;border-radius:0.85cqw;background:${busy ? '#D6CCC0' : '#059669'};color:#fff;font-weight:800;border:none;cursor:${busy ? 'not-allowed' : 'pointer'};">${busy ? 'Phòng bận' : 'Nhận'}</button>
+                <button data-rep-dec="${c.id}" type="button" style="padding:0.55cqw 0.8cqw;border-radius:0.85cqw;background:#EFE6DA;color:#5C4636;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">Từ chối</button>
+              </div>
+            </div>
+          `;
+        }).join('') + `</div>`;
+      }
+    } else if (tab === 'working') {
+      if (!activeJobs.length) {
+        body += `<div style="text-align:center;padding:2cqw 1cqw;color:#7C6350;">Chưa có dự án nào đang chạy. Hãy nhận đơn ở mục Chưa nhận!</div>`;
+      } else {
+        body += `<div style="display:flex;flex-direction:column;gap:0.7cqw;">` + activeJobs.map(({ rc, job }) => `
+          <div style="padding:0.85cqw 1cqw;border-radius:1.05cqw;border:0.12cqw solid ${job.ready ? '#34D399' : '#DFD2C1'};background:${job.ready ? '#ECFDF5' : '#FAF6F0'};display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:900;color:#3D2B1F;">${rc.icon} ${job.title} <span style="font-weight:700;color:#6B5443;">(${rc.name})</span></div>
+              <div style="font-size:1.02cqw;color:#6B5443;margin-top:0.15cqw;">Thù lao: <strong style="color:#059669;">${FIN.fmtMoney(job.reward)}</strong> · Tiến độ: <strong>${Math.floor(job.progress)}%</strong></div>
+            </div>
+            <div style="flex-shrink:0;">
+              ${job.ready
+                ? `<button data-rep-del="${rc.id}" type="button" style="padding:0.6cqw 1cqw;border-radius:0.85cqw;background:#059669;color:#fff;font-weight:900;border:none;cursor:pointer;display:inline-flex;align-items:center;">${TICK_SVG}Bàn giao</button>`
+                : (job.issue
+                    ? `<button data-rep-fix="${rc.id}" type="button" style="padding:0.6cqw 0.95cqw;border-radius:0.85cqw;background:#EA580C;color:#fff;font-weight:800;border:none;cursor:pointer;">${job.issue === 'server' ? '🔧 Sửa Server' : '☕ Pha Cà Phê'}</button>`
+                    : `<span style="padding:0.45cqw 0.8cqw;border-radius:999px;background:#EFE6DA;color:#5C4636;font-weight:800;font-size:1cqw;">Đang xử lý...</span>`)
+              }
+            </div>
+          </div>
+        `).join('') + `</div>`;
+      }
+    } else {
+      body += `<div style="margin-bottom:0.75cqw;padding:0.6cqw 0.95cqw;border-radius:0.9cqw;background:#ECFDF5;color:#065F46;font-weight:800;">Tổng doanh thu đã bàn giao Ngày ${state.day}: ${FIN.fmtMoney(state.dayRevenue)} (${doneList.length} đơn)</div>`;
+      if (!doneList.length) {
+        body += `<div style="text-align:center;padding:1.6cqw 1cqw;color:#7C6350;">Chưa có đơn hàng nào hoàn thành trong hôm nay.</div>`;
+      } else {
+        body += `<div style="display:flex;flex-direction:column;gap:0.55cqw;">` + doneList.map(d => `
+          <div style="padding:0.65cqw 0.95cqw;border-radius:0.95cqw;border:0.12cqw solid #DFD2C1;background:#FFFDF9;display:flex;align-items:center;justify-content:space-between;">
+            <div><strong>${d.roomIcon} ${d.title}</strong> <span style="color:#7C6350;font-size:1cqw;">(${d.roomName} · ${d.time})</span></div>
+            <div style="font-weight:900;color:#059669;">+${FIN.fmtMoney(d.reward)} <span style="color:#D97706;">+${d.stars}★</span></div>
+          </div>
+        `).join('') + `</div>`;
+      }
+    }
+
+    openModal(`📋 Báo Cáo Công Việc — Ngày ${state.day}`, body);
+
+    document.querySelectorAll('[data-rep-tab]').forEach(b => { b.onclick = () => openReportModal(b.dataset.repTab); });
+    document.querySelectorAll('[data-rep-acc]').forEach(b => { b.onclick = () => { if (acceptClientById(b.dataset.repAcc)) openReportModal('working'); }; });
+    document.querySelectorAll('[data-rep-dec]').forEach(b => { b.onclick = () => { dismissClient(b.dataset.repDec, false); openReportModal('pending'); }; });
+    document.querySelectorAll('[data-rep-del]').forEach(b => { b.onclick = () => { deliverRoomJob(b.dataset.repDel); openReportModal('done'); }; });
+    document.querySelectorAll('[data-rep-fix]').forEach(b => {
+      b.onclick = () => {
+        const rs = state.rooms[b.dataset.repFix];
+        if (rs && rs.job) { rs.job.issue = null; AUD.playSFX('click'); renderMapOverlays(); openReportModal('working'); }
+      };
+    });
+  }
+
+  function dismissAllClients() {
+    waitingClients.forEach(c => {
+      const ca = agents.find(a => a.id === c.id);
+      if (ca) sendAgent(ca, 'outside', '👋');
+    });
+    waitingClients = [];
+  }
+
+  // ==================== MAP OVERLAYS (SMART DIFF — ZERO DROPPED MOBILE TAPS) ====================
+  function computeOverlaySig() {
+    const rSig = CFG.ROOMS.map(rc => {
+      const rs = state.rooms[rc.id];
+      const canBuy = !rs.unlocked && state.money >= rc.unlockCost ? 1 : 0;
+      const down = state.disabledRoomId === rc.id ? 1 : 0;
+      const jState = !rs.job ? '0' : (rs.job.ready ? 'R' : (rs.job.issue || 'W'));
+      return `${rc.id}:${rs.unlocked?1:0}:${canBuy}:${down}:${rs.equipLv}:${jState}:${state.selectedRoom===rc.id?1:0}`;
+    }).join('|');
+    const cSig = waitingClients.filter(c => c.arrived).map(c => `${c.id}:${c.tier}`).join(',');
+    return rSig + '#' + cSig + '#' + (state.tutorialStep === 1 ? 1 : 0);
+  }
+
+  function updateOverlayLiveMetrics() {
+    CFG.ROOMS.forEach(rc => {
+      const rs = state.rooms[rc.id];
+      if (!rs.job || rs.job.ready || rs.job.issue) return;
+      const pctEl = document.getElementById('prog-txt-' + rc.id);
+      const barEl = document.getElementById('prog-bar-' + rc.id);
+      if (pctEl) pctEl.textContent = (rs.job.tier === 'rush' ? '⚡ ' : '') + Math.floor(rs.job.progress) + '%';
+      if (barEl) barEl.style.width = rs.job.progress.toFixed(1) + '%';
+    });
+    waitingClients.forEach(c => {
+      if (!c.arrived) return;
+      const tEl = document.getElementById('cli-pat-' + c.id);
+      if (tEl) tEl.textContent = state.tutorialStep === 1 ? 'Nhận!' : `${Math.ceil(c.patience)}s`;
+    });
+  }
+
+  function renderMapOverlays(force = false) {
+    const sig = computeOverlaySig();
+    if (!force && sig === lastOverlaySig) {
+      updateOverlayLiveMetrics();
+      return;
+    }
+    lastOverlaySig = sig;
+    const layer = document.getElementById('mapOverlaysLayer');
+    layer.innerHTML = '';
+
+    CFG.ROOMS.forEach(rc => {
+      const rs = state.rooms[rc.id];
+      if (!rs.unlocked) {
+        const canBuy = state.money >= rc.unlockCost;
+        // 1. Isometric frosted blueprint polygon hugging the exact angled room walls
+        if (rc.poly) {
+          const polyEl = document.createElement('div');
+          polyEl.className = 'iso-lock-poly' + (canBuy ? ' can-buy' : '');
+          polyEl.style.clipPath = rc.poly;
+          polyEl.style.webkitClipPath = rc.poly;
+          layer.appendChild(polyEl);
+        }
+        // 2. Sculpted 3D compact unlock plaque centered inside the room
+        const pos = rc.plaquePos || rc.lockBox;
+        const lockSvg = canBuy
+          ? `<svg class="plaque-lock-svg" viewBox="0 0 28 28" fill="none"><path d="M9 12V8.5a5 5 0 0 1 9.5-2" stroke="#FEF9C3" stroke-width="2.5" stroke-linecap="round"/><rect x="6" y="12" width="16" height="12" rx="3.2" fill="#FEF3C7" stroke="#065F46" stroke-width="2"/><circle cx="14" cy="18" r="1.8" fill="#047857"/></svg>`
+          : `<svg class="plaque-lock-svg" viewBox="0 0 28 28" fill="none"><path d="M9.5 12V9a4.5 4.5 0 0 1 9 0v3" stroke="#8C6D53" stroke-width="2.5" stroke-linecap="round"/><rect x="6" y="12" width="16" height="12" rx="3.2" fill="#F59E0B" stroke="#78350F" stroke-width="2"/><circle cx="14" cy="18" r="1.8" fill="#FFFDF9"/></svg>`;
+        const plaque = document.createElement('button');
+        plaque.type = 'button';
+        plaque.className = 'iso-lock-plaque' + (canBuy ? ' can-buy' : '');
+        plaque.style.left = pos.x + '%';
+        plaque.style.top = pos.y + '%';
+        plaque.innerHTML = `
+          ${lockSvg}
+          <div class="plaque-name">${rc.name}</div>
+          
+          <div class="plaque-price">${canBuy ? 'Mở ngay · ' : ''}${FIN.fmtMoney(rc.unlockCost)}</div>
+        `;
+        plaque.addEventListener('click', () => unlockRoom(rc));
+        layer.appendChild(plaque);
+        return;
+      }
+
+      // If room is temporarily shut down by a real Event!
+      if (state.disabledRoomId === rc.id) {
+        const down = document.createElement('button');
+        down.type = 'button';
+        down.className = 'room-down-overlay';
+        down.style.left = rc.lockBox.x + '%';
+        down.style.top = rc.lockBox.y + '%';
+        down.style.width = rc.lockBox.w + '%';
+        down.style.height = rc.lockBox.h + '%';
+        down.innerHTML = `<div style="font-size:1.8cqw;">⚡🔧</div><div style="font-size:1.05cqw;font-weight:900;">SỰ CỐ HỆ THỐNG</div><div style="font-size:0.95cqw;color:#FDE68A;">Chạm sửa ($280)</div>`;
+        down.addEventListener('click', () => {
+          if (state.money < 280) return showToast('Cần $280 để gọi thợ sửa ngay!');
+          state.money -= 280;
+          state.disabledRoomId = null;
+          state.activeEventTag = '';
+          AUD.playSFX('unlock');
+          showToast(`${TICK_SVG}Đã sửa xong ${rc.name}, hoạt động bình thường trở lại!`);
+          renderHUD();
+          renderMapOverlays();
+        });
+        layer.appendChild(down);
+        return;
+      }
+
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'room-chip' + (state.selectedRoom === rc.id ? ' active' : '');
+      chip.style.left = rc.chipPos.x + '%';
+      chip.style.top = rc.chipPos.y + '%';
+      chip.innerHTML = `<span>${rc.icon}</span><span>Lv.${rs.equipLv}</span>`;
+      chip.addEventListener('click', () => {
+        AUD.playSFX('click');
+        state.selectedRoom = (state.selectedRoom === rc.id) ? null : rc.id;
+        renderMapOverlays();
+        renderDrawer();
+      });
+      layer.appendChild(chip);
+
+      if (rs.job) {
+        const j = rs.job;
+        const px = rc.lockBox.x;
+        const py = rc.lockBox.y;
+
+        if (j.ready) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'action-bubble action-deliver';
+          btn.style.left = px + '%';
+          btn.style.top = py + '%';
+          btn.innerHTML = `${TICK_SVG}<span>Thu ${FIN.fmtMoney(j.reward)}</span>`;
+          btn.addEventListener('click', () => {
+            deliverRoomJob(rc.id);
+            return;
+            AUD.playSFX('cash');
+            spawnCoin(px, py, '+' + FIN.fmtMoney(j.reward));
+            showToast(`${TICK_SVG}Bàn giao thành công! +${FIN.fmtMoney(j.reward)} & +${j.stars} ★`);
+            advanceTutorial(3);
+            autoSave();
+            renderHUD();
+            renderMapOverlays();
+          });
+          layer.appendChild(btn);
+        } else if (j.issue) {
+          const isServer = j.issue === 'server';
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'action-bubble ' + (isServer ? 'action-alert' : 'action-coffee');
+          btn.style.left = px + '%';
+          btn.style.top = py + '%';
+          btn.innerHTML = isServer ? `<span>🔧</span><span>Sửa Server!</span>` : `<span>☕</span><span>Pha Cà Phê!</span>`;
+          btn.addEventListener('click', () => {
+            j.issue = null;
+            AUD.playSFX('click');
+            showToast(`${TICK_SVG}${isServer ? 'Đã khắc phục tủ Server!' : 'Đã tiếp cà phê, nhân viên làm tiếp!'}`);
+            renderMapOverlays();
+          });
+          layer.appendChild(btn);
+        } else {
+          const pill = document.createElement('div');
+          pill.className = 'work-progress-pill';
+          pill.style.left = px + '%';
+          pill.style.top = (py + 2) + '%';
+          pill.innerHTML = `
+            <div id="prog-txt-${rc.id}" style="font-size:0.88cqw;font-weight:800;color:#4A3426;text-align:center;">${j.tier === 'rush' ? '⚡ ' : ''}${Math.floor(j.progress)}%</div>
+            <div class="work-progress-bar"><div id="prog-bar-${rc.id}" class="work-progress-fill" style="width:${j.progress}%"></div></div>
+          `;
+          layer.appendChild(pill);
+        }
+      }
+    });
+
+    // Render all arrived waiting clients at Reception
+    waitingClients.forEach(c => {
+      if (!c.arrived) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const tierCls = c.tier === 'rush' ? 'action-rush' : (c.tier === 'mega' ? 'action-mega' : 'action-contract');
+      btn.className = 'action-bubble ' + tierCls;
+      btn.style.left = c.slotX + '%';
+      btn.style.top = c.slotY + '%';
+      const icon = c.tier === 'rush' ? '⚡' : (c.tier === 'mega' ? '🌟' : (c.isVIP ? '💎' : '📋'));
+      const timeTxt = state.tutorialStep === 1 ? 'Nhận!' : `${Math.ceil(c.patience)}s`;
+      btn.innerHTML = `<span>${icon}</span><span>${FIN.fmtMoney(c.reward)} (<span id="cli-pat-${c.id}">${timeTxt}</span>)</span>`;
+      btn.addEventListener('click', () => openContractOfferModal(c.id));
+      layer.appendChild(btn);
+    });
+  }
+
+  function unlockRoom(rc) {
+    if (state.money < rc.unlockCost) {
+      AUD.playSFX('alert');
+      showToast(`Cần ${FIN.fmtMoney(rc.unlockCost)} để mở khóa ${rc.name}!`);
+      return;
+    }
+    state.money -= rc.unlockCost;
+    state.rooms[rc.id].unlocked = true;
+    state.rooms[rc.id].staff = 1;
+    AUD.playSFX('unlock');
+    if (rc.poly) {
+      const burst = document.createElement('div');
+      burst.className = 'iso-unlock-burst';
+      burst.style.clipPath = rc.poly;
+      burst.style.webkitClipPath = rc.poly;
+      document.getElementById('coinsLayer').appendChild(burst);
+      setTimeout(() => burst.remove(), 700);
+    }
+    spawnCoin((rc.plaquePos || rc.lockBox).x, (rc.plaquePos || rc.lockBox).y, `Mở ${rc.name}!`);
+    const isClosed = getPhase(state.minutes).key === 'night';
+    showToast(isClosed
+      ? `${TICK_SVG}Đã mở ${rc.name}! Nhân viên mới sẽ bắt đầu làm lúc 08:00 sáng mai.`
+      : `${TICK_SVG}Đã mở khóa ${rc.name}! Nhân viên mới đang vào văn phòng.`);
+    rebuildStaffAgents(true);
+    advanceTutorial(4);
+    autoSave();
+    renderHUD();
+    renderMapOverlays();
+  }
+
+  // ==================== JUICY ROOM UPGRADE POPUP ====================
+  function renderSegments(elId, current, max) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    let html = '';
+    for (let i = 1; i <= max; i++) html += `<span class="up-seg${i <= current ? ' filled' : ''}"></span>`;
+    el.innerHTML = html;
+  }
+  function styleUpgradeBtn(btnId, isMax, cost) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.classList.remove('poor', 'maxed');
+    if (isMax) { btn.textContent = '★ MAX'; btn.classList.add('maxed'); }
+    else { btn.textContent = '$' + fmtShort(cost); if (state.money < cost) btn.classList.add('poor'); }
+  }
+
+  function renderDrawer() {
+    const d = document.getElementById('roomDrawer');
+    if (!state.selectedRoom) { d.classList.add('closed'); d.classList.remove('open'); return; }
+    const rc = CFG.ROOMS.find(r => r.id === state.selectedRoom);
+    const rs = state.rooms[rc.id];
+    d.classList.remove('closed');
+    d.classList.add('open');
+
+    const staffCost = Math.max(450, Math.round((rc.unlockCost || 550) * 0.95 * rs.staff));
+    const equipCost = Math.max(320, Math.round((rc.unlockCost || 450) * 0.6 * Math.pow(1.75, rs.equipLv - 1)));
+    const speedCost = Math.max(280, Math.round((rc.unlockCost || 400) * 0.55 * Math.pow(1.7, rs.speedLv - 1)));
+
+    const curReward = rc.baseReward > 0 ? Math.round(rc.baseReward * (1 + (rs.equipLv - 1) * 0.35)) : 0;
+    const dailyCost = rc.dailyRent + rc.staffSalary * rs.staff;
+
+    document.getElementById('drHeroIcon').textContent = rc.icon;
+    document.getElementById('drTitle').textContent = rc.name;
+    document.getElementById('drStarsRow').textContent = '★'.repeat(rs.equipLv) + '☆'.repeat(5 - rs.equipLv);
+    document.getElementById('drStatVal').textContent = curReward > 0 ? FIN.fmtMoney(curReward) : 'Hỗ trợ';
+    document.getElementById('drStatCost').textContent = '-' + FIN.fmtMoney(dailyCost);
+    
+
+    document.getElementById('upStaffSub').textContent = `${rs.staff}/${rc.maxStaff}`;
+    document.getElementById('upEquipSub').textContent = `Lv.${rs.equipLv}/5`;
+    document.getElementById('upSpeedSub').textContent = `Lv.${rs.speedLv}/5`;
+
+    renderSegments('upStaffBar', rs.staff, rc.maxStaff);
+    renderSegments('upEquipBar', rs.equipLv, 5);
+    renderSegments('upSpeedBar', rs.speedLv, 5);
+
+    styleUpgradeBtn('upStaff', rs.staff >= rc.maxStaff, staffCost);
+    styleUpgradeBtn('upEquip', rs.equipLv >= 5, equipCost);
+    styleUpgradeBtn('upSpeed', rs.speedLv >= 5, speedCost);
+
+    const mgrCost = Math.max(1200, Math.round((rc.unlockCost || 800) * 1.1));
+    const mgrBtn = document.getElementById('upMgr');
+    const mgrSub = document.getElementById('upMgrSub');
+    if (mgrBtn && mgrSub) {
+      mgrBtn.classList.remove('poor', 'maxed');
+      if (rs.hasManager) {
+        mgrSub.textContent = 'Đang tự động hóa';
+        mgrBtn.textContent = '★ ĐÃ CÓ';
+        mgrBtn.classList.add('maxed');
+        mgrBtn.onclick = null;
+      } else if (rs.staff < rc.maxStaff) {
+        mgrSub.textContent = `Cần đủ ${rc.maxStaff}/${rc.maxStaff} NV`;
+        mgrBtn.textContent = '🔒 Khóa';
+        mgrBtn.classList.add('poor');
+        mgrBtn.onclick = () => showToast(`Hãy tuyển đủ ${rc.maxStaff}/${rc.maxStaff} nhân sự trước khi thăng chức Quản lý!`);
+      } else {
+        mgrSub.textContent = rc.id === 'lobby' ? 'Tự nhận đơn thường' : 'Tự xử lý & thu tiền';
+        mgrBtn.textContent = '$' + fmtShort(mgrCost);
+        if (state.money < mgrCost) mgrBtn.classList.add('poor');
+        mgrBtn.onclick = () => {
+          if (state.money < mgrCost) return showToast(`Cần ${FIN.fmtMoney(mgrCost)} để thăng chức Quản lý!`);
+          state.money -= mgrCost;
+          rs.hasManager = true;
+          AUD.playSFX('unlock');
+          spawnCoin(rc.lockBox.x, rc.lockBox.y, '🎖️ Quản Lý!');
+          autoSave(); renderHUD(); renderDrawer();
+          showToast(`${TICK_SVG}${rc.name} đã có Quản Lý Tự Động!`);
+        };
+      }
+    }
+
+    document.getElementById('upStaff').onclick = () => {
+      if (rs.staff >= rc.maxStaff) return;
+      if (state.money < staffCost) return showToast('Chưa đủ tiền mặt để tuyển thêm nhân sự!');
+      state.money -= staffCost;
+      rs.staff += 1;
+      AUD.playSFX('unlock');
+      const phaseKey = getPhase(state.minutes).key;
+      rebuildStaffAgents(true);
+      autoSave();
+      renderHUD();
+      renderDrawer();
+      if (phaseKey === 'night') {
+        showToast(`${TICK_SVG}Đã ký hợp đồng! Nhân viên mới sẽ đi làm lúc 08:00 sáng mai.`);
+      } else if (phaseKey === 'lunch') {
+        showToast(`${TICK_SVG}Đã tuyển nhân sự ${rc.name}! Đang ra Pantry nghỉ trưa cùng team.`);
+      } else {
+        spawnCoin(rc.lockBox.x, rc.lockBox.y, '+1 Nhân sự!');
+        showToast(`${TICK_SVG}Đã tuyển thêm nhân sự cho ${rc.name}!`);
+      }
+    };
+    document.getElementById('upEquip').onclick = () => {
+      if (rs.equipLv >= 5) return;
+      if (state.money < equipCost) return showToast('Chưa đủ tiền để nâng cấp thiết bị!');
+      state.money -= equipCost;
+      rs.equipLv += 1;
+      recordQuestProgress('action', 1);
+      AUD.playSFX('unlock');
+      spawnCoin(rc.lockBox.x, rc.lockBox.y, `Thiết bị Lv.${rs.equipLv}!`);
+      autoSave(); renderHUD(); renderMapOverlays(); renderDrawer();
+      showToast(`${TICK_SVG}Nâng thiết bị ${rc.name} lên Lv.${rs.equipLv}!`);
+    };
+    document.getElementById('upSpeed').onclick = () => {
+      if (rs.speedLv >= 5) return;
+      if (state.money < speedCost) return showToast('Chưa đủ tiền để nâng tiện ích!');
+      state.money -= speedCost;
+      rs.speedLv += 1;
+      AUD.playSFX('unlock');
+      spawnCoin(rc.lockBox.x, rc.lockBox.y, `Tốc độ Lv.${rs.speedLv}!`);
+      autoSave(); renderHUD(); renderDrawer();
+      showToast(`${TICK_SVG}Nâng tiện ích ${rc.name} lên Lv.${rs.speedLv}!`);
+    };
+  }
+
+  // ==================== REAL TANGIBLE OFFICE EVENTS (DAY 2+) ====================
+  function triggerRandomEvent() {
+    if (state.day < 2 || state.eventTriggeredToday) return;
+    state.eventTriggeredToday = true;
+
+    const hasFin = state.rooms.finance.unlocked;
+    const workRooms = CFG.ROOMS.filter(r => r.baseReward > 0 && state.rooms[r.id].unlocked);
+    const targetRoom = workRooms[Math.floor(Math.random() * workRooms.length)] || CFG.ROOMS[1];
+
+    const pool = ['power_outage', 'staff_sick', 'tax_audit', 'macro_wave'];
+    const kind = pool[Math.floor(Math.random() * pool.length)];
+    AUD.playSFX('alert');
+
+    if (kind === 'power_outage') {
+      openModal(`⚡ Biến Cố: Chập điện tại ${targetRoom.name}!`, `
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Đường dây tại <strong>${targetRoom.name}</strong> vừa gặp sự cố. Nếu không sửa ngay, phòng này sẽ <strong>ngừng hoạt động</strong> trong hôm nay!</p>
+        <div style="display:flex;flex-direction:column;gap:0.7cqw;">
+          <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Chi $280 gọi thợ sửa ngay lập tức</button>
+          <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;text-align:left;">B. Tạm đóng ${targetRoom.name} hôm nay (tiết kiệm tiền)</button>
+        </div>
+      `);
+      document.getElementById('evA').onclick = () => {
+        if (state.money < 280) return showToast('Không đủ $280 tiền mặt — hãy chọn phương án B!');
+        state.money -= 280; closeModal(); showToast(`${TICK_SVG}Đã sửa xong sự cố điện tại ${targetRoom.name}!`); renderHUD();
+      };
+      document.getElementById('evB').onclick = () => {
+        state.disabledRoomId = targetRoom.id;
+        state.activeEventTag = `🔧 ${targetRoom.name} tạm ngừng do chập điện`;
+        state.rooms[targetRoom.id].job = null;
+        closeModal(); showToast(`⚡ ${targetRoom.name} đã tạm khóa trên bản đồ!`); renderHUD(); renderMapOverlays();
+      };
+    } else if (kind === 'staff_sick') {
+      openModal(`🤒 Biến Cố: Nhân viên ${targetRoom.name} xin nghỉ ốm`, `
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Một nhân sự ở <strong>${targetRoom.name}</strong> bị cảm nặng và xin về nhà nghỉ hôm nay, làm giảm tốc độ xử lý của phòng.</p>
+        <div style="display:flex;flex-direction:column;gap:0.7cqw;">
+          <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Chi $260 thuê CTV làm thay + thăm hỏi (+5% Tinh thần)</button>
+          <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;text-align:left;">B. Cho nhân viên về nghỉ (giảm công suất ${targetRoom.name} hôm nay)</button>
+        </div>
+      `);
+      document.getElementById('evA').onclick = () => {
+        if (state.money < 260) return showToast('Không đủ $260 tiền mặt — hãy chọn phương án B!');
+        state.money -= 260; state.morale = Math.min(100, state.morale + 5);
+        closeModal(); showToast(`${TICK_SVG}Đã bố trí CTV thay thế & cả team rất vui (+5% Tinh thần)!`); renderHUD();
+      };
+      document.getElementById('evB').onclick = () => {
+        state.sickStaffRoomId = targetRoom.id;
+        state.activeEventTag = `🤒 ${targetRoom.name} thiếu 1 nhân sự hôm nay`;
+        const ag = agents.find(a => a.role === 'staff' && a.roomId === targetRoom.id);
+        if (ag) { ag.sickToday = true; sendAgent(ag, 'outside', '🤒'); }
+        closeModal(); showToast(`🤒 Nhân viên ${targetRoom.name} đang ra cửa về nhà nghỉ ngơi.`); renderHUD();
+      };
+    } else if (kind === 'tax_audit') {
+      openModal('🧾 Biến Cố: Thanh Tra Thuế & Sổ Sách Ghé Thăm', `
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Đoàn kiểm tra tài chính đang rà soát chứng từ của <strong>${state.companyName}</strong>.</p>
+        ${hasFin
+          ? `<div style="padding:0.95cqw;border-radius:1cqw;background:#ECFDF5;border:0.13cqw solid #6EE7B7;color:#065F46;font-weight:800;margin-bottom:1cqw;">${TICK_SVG}Nhờ có <strong>Phòng Tài Chính</strong>, sổ sách hoàn toàn minh bạch! Công ty nhận thưởng +$300 & +4 ★ Uy tín!</div>
+             <button id="evFinPass" type="button" style="width:100%;padding:0.9cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Nhận thưởng minh bạch</button>`
+          : `<div style="padding:0.95cqw;border-radius:1cqw;background:#FEF2F2;border:0.13cqw solid #FECACA;color:#991B1B;font-weight:800;margin-bottom:1cqw;">⚠️ Công ty chưa mở <strong>Phòng Tài Chính</strong> nên sổ sách còn thiếu sót!</div>
+             <div style="display:flex;flex-direction:column;gap:0.7cqw;">
+               <button id="evA" type="button" style="padding:0.85cqw;border-radius:1cqw;background:#DC2626;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Nộp phạt bổ sung hồ sơ (-$420)</button>
+               <button id="evB" type="button" style="padding:0.85cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;text-align:left;">B. Xin gia hạn giải trình (-4 ★ Uy tín)</button>
+             </div>`
+        }
+      `);
+      if (hasFin) {
+        document.getElementById('evFinPass').onclick = () => {
+          state.money += 300; state.stars += 4; AUD.playSFX('cash'); closeModal();
+          showToast(`${TICK_SVG}Vượt qua Thanh tra Thuế! +$300 & +4 ★`); renderHUD();
+        };
+      } else {
+        document.getElementById('evA').onclick = () => { if (state.money < 420) return showToast('Không đủ $420 tiền mặt — hãy chọn phương án B!'); state.money -= 420; closeModal(); showToast('Đã nộp phạt bổ sung -$420. Hãy sớm mở Phòng Tài Chính!'); renderHUD(); };
+        document.getElementById('evB').onclick = () => { state.stars = Math.max(0, state.stars - 4); closeModal(); showToast('Đã gia hạn giải trình (-4 ★ Uy tín).'); renderHUD(); };
+      }
+    } else {
+      openModal('📉 Biến Cố Vĩ Mô: Thị Trường Rung Lắc Mạnh', `
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Kinh tế chung chững lại trong ngày: lượng khách ghé sảnh giảm 30%, mã <strong>[TECH]/[REAL]</strong> giảm điểm nhưng <strong>[GOLD] tăng vọt +16%</strong>!</p>
+        <div style="display:flex;flex-direction:column;gap:0.7cqw;">
+          <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Chấp nhận thị trường chậm (mở 🏦 Tài Chính mua Vàng [GOLD])</button>
+          <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#EA580C;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">B. Chi $250 khuyến mãi giữ lượng khách 100% hôm nay (+3 ★)</button>
+        </div>
+      `);
+      FIN.updateStockPrices(state, { TECH: -0.14, REAL: -0.10, GOLD: 0.16 });
+      state.newsHint = '📉 Biến cố thị trường: [GOLD] tăng mạnh +16%, [TECH]/[REAL] giảm điểm!';
+      document.getElementById('evA').onclick = () => {
+        state.clientRateDebuff = 0.7;
+        state.activeEventTag = '📉 Thị trường chững (-30% khách · [GOLD] +16%)';
+        closeModal(); renderHUD();
+      };
+      document.getElementById('evB').onclick = () => {
+        if (state.money < 250) return showToast('Không đủ $250 tiền mặt — hãy chọn phương án A!');
+        state.money -= 250; state.stars += 3;
+        closeModal(); showToast(`${TICK_SVG}Tung khuyến mãi thành công! Lượng khách giữ ổn định (+3 ★).`); renderHUD();
+      };
+    }
+  }
+
+  // ==================== 17:00 DAILY CLOSING (RUSH PENALTIES + FINANCE DISCOUNT) ====================
+  function processEndOfDay() {
+    if (state.dailyClosed) return;
+    state.dailyClosed = true;
+    dismissAllClients();
+
+    agents.forEach((a, i) => {
+      if (a.role === 'staff' && !a.sickToday) {
+        a.wait = i * 0.25;
+        sendAgent(a, 'outside', '👋');
+      }
+    });
+
+    // Check unfinished Rush contracts at 17:00 -> Real penalty!
+    let rushPenalty = 0;
+    CFG.ROOMS.forEach(rc => {
+      const rs = state.rooms[rc.id];
+      if (rs.job && rs.job.tier === 'rush' && !rs.job.ready) {
+        rushPenalty += 300;
+        state.stars = Math.max(0, state.stars - 3);
+        rs.job = null;
+      }
+    });
+    state.dayPenalty = rushPenalty;
+
+    if (state.marketingCampaign) {
+      state.marketingCampaign.daysLeft -= 1;
+      if (state.marketingCampaign.daysLeft <= 0) state.marketingCampaign = null;
+    }
+
+    let totalRent = 0, totalSalary = 0;
+    CFG.ROOMS.forEach(rc => {
+      const rs = state.rooms[rc.id];
+      if (rs.unlocked) { totalRent += rc.dailyRent; totalSalary += rc.staffSalary * rs.staff; }
+    });
+
+    // Finance Room operating cost discount!
+    const hasFin = state.rooms.finance.unlocked;
+    const discountRate = hasFin ? Math.min(0.30, 0.12 + state.rooms.finance.equipLv * 0.03) : 0;
+    const savedCost = Math.round((totalRent + totalSalary) * discountRate);
+    const finalOpCost = totalRent + totalSalary - savedCost;
+
+    let loanPayment = 0;
+    if (state.loan) {
+      loanPayment = state.loan.dailyPay;
+      state.loan.daysLeft -= 1;
+      if (state.loan.daysLeft <= 0) state.loan = null;
+    }
+
+    const flexRate = hasFin ? 0.02 : 0.015;
+    const fixRate = hasFin ? 0.045 : 0.04;
+    const flexInt = Math.round(state.savings.flex * flexRate);
+    state.savings.flex += flexInt;
+    let fixedInt = 0;
+    if (state.savings.fixed > 0) {
+      fixedInt = Math.round(state.savings.fixed * fixRate);
+      state.savings.fixed += fixedInt;
+      state.savings.fixedDaysLeft = Math.max(0, state.savings.fixedDaysLeft - 1);
+    }
+
+    const dividend = CFG.BRANCHES[state.branchIdx].dividend;
+    const prodIncome = EMP.getDailyProductIncome(state);
+    const rivalDiv = EMP.getDailyRivalDividend(state);
+    const passiveTotal = dividend + prodIncome + rivalDiv;
+    const netProfitToday = state.dayRevenue + passiveTotal - finalOpCost - loanPayment - rushPenalty;
+    const investorShare = (netProfitToday > 0 && state.investorEquity > 0)
+      ? Math.round(netProfitToday * (state.investorEquity / 100))
+      : 0;
+    state.money += (passiveTotal - finalOpCost - loanPayment - rushPenalty - investorShare);
+    // Own stock reflects daily profitability after IPO
+    if (state.ipoDone) {
+      const ownSt = state.stocks.find(x => x.isOwn);
+      if (ownSt) ownSt.nextBias = netProfitToday > 0 ? 0.09 : -0.06;
+    }
+
+    if (state.money < 0) state.debtDays += 1;
+    else state.debtDays = 0;
+
+    const nw = FIN.getNetWorth(state);
+    if (nw > state.peakNetWorth) state.peakNetWorth = nw;
+    autoSave();
+    renderHUD();
+
+    if (state.debtDays >= 2 || state.money < -3000) {
+      AUD.playSFX('alert');
+      openModal('💥 Tuyên Bố Phá Sản — Game Over', `
+        <div style="text-align:center;padding:0.8cqw 0;">
+          <div style="font-size:3cqw;">🏦</div>
+          <div style="font-size:1.5cqw;font-weight:900;color:#DC2626;margin-top:0.3cqw;">${state.companyName} đã mất khả năng thanh toán!</div>
+          <div style="background:#FAF6F0;border-radius:1.1cqw;padding:1cqw;border:0.12cqw solid #DFD2C1;text-align:left;margin:0.9cqw 0 1.1cqw 0;">
+            <div>CEO: <strong>${state.ceoName}</strong> · Trụ vững: <strong>${state.day} ngày</strong></div>
+            <div>Hợp đồng hoàn thành: <strong>${state.contractsDone} đơn</strong> · Đỉnh tài sản: <strong>${FIN.fmtMoney(state.peakNetWorth)}</strong></div>
+          </div>
+          <button id="btnRestartAfterBankrupt" type="button" style="width:100%;padding:0.95cqw;border-radius:1cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;">🔄 Tái Khởi Nghiệp (Ngày 1)</button>
+        </div>
+      `);
+      document.getElementById('btnRestartAfterBankrupt').onclick = () => {
+        try { localStorage.removeItem(CFG.SAVE_KEY); } catch (e) {}
+        closeModal(); showIntroScreen();
+      };
+      return;
+    }
+
+    openModal(`📊 Chốt Sổ Ngày ${state.day} — ${state.companyName}`, `
+      <div style="background:#FAF6F0;border:0.12cqw solid #DFD2C1;border-radius:1.1cqw;padding:1cqw;display:flex;flex-direction:column;gap:0.5cqw;">
+        <div style="display:flex;justify-content:space-between;"><span>Doanh thu chốt đơn hôm nay</span><strong style="color:#059669;">+${FIN.fmtMoney(state.dayRevenue)}</strong></div>
+        ${dividend > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Cổ tức Chi nhánh toàn cầu</span><strong style="color:#059669;">+${FIN.fmtMoney(dividend)}</strong></div>` : ''}
+        ${prodIncome > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🚀 Doanh thu Sản Phẩm riêng</span><strong style="color:#059669;">+${FIN.fmtMoney(prodIncome)}</strong></div>` : ''}
+        ${rivalDiv > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🏢 Cổ tức Thâu tóm M&A</span><strong style="color:#059669;">+${FIN.fmtMoney(rivalDiv)}</strong></div>` : ''}
+        ${(flexInt + fixedInt) > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Lãi tiết kiệm ngân hàng</span><strong style="color:#059669;">+${FIN.fmtMoney(flexInt + fixedInt)}</strong></div>` : ''}
+        <div style="display:flex;justify-content:space-between;"><span>Thuê mặt bằng & Lương NV ${savedCost > 0 ? `<em style="color:#059669;">(P.Tài Chính giảm ${FIN.fmtMoney(savedCost)})</em>` : ''}</span><strong style="color:#DC2626;">-${FIN.fmtMoney(finalOpCost)}</strong></div>
+        ${loanPayment > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Trả góp Ngân hàng</span><strong style="color:#DC2626;">-${FIN.fmtMoney(loanPayment)}</strong></div>` : ''}
+        ${rushPenalty > 0 ? `<div style="display:flex;justify-content:space-between;"><span>⚡ Phạt trễ hạn Đơn Hỏa Tốc</span><strong style="color:#DC2626;">-${FIN.fmtMoney(rushPenalty)}</strong></div>` : ''}
+        ${investorShare > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🤝 Chia lãi Nhà đầu tư (${state.investorEquity}%)</span><strong style="color:#C2410C;">-${FIN.fmtMoney(investorShare)}</strong></div>` : ''}
+        <div style="display:flex;justify-content:space-between;padding-top:0.55cqw;border-top:0.12cqw solid #D8C7B2;font-weight:900;font-size:1.35cqw;">
+          <span>Số dư tiền mặt hiện tại</span>
+          <span style="color:${state.money >= 0 ? '#059669' : '#DC2626'};">${FIN.fmtMoney(state.money)}</span>
+        </div>
+      </div>
+      ${state.money < 0 ? `<div style="margin-top:0.75cqw;padding:0.7cqw;border-radius:0.9cqw;background:#FEF2F2;color:#B91C1C;font-weight:800;">⚠️ CẢNH BÁO NỢ (1/2 NGÀY): Hãy bán cổ phiếu, rút tiết kiệm hoặc chạy đơn gấp ngày mai!</div>` : ''}
+      <div style="display:flex;gap:0.75cqw;margin-top:1cqw;">
+        <button id="btnStayNight" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">🛠️ Ở lại nâng cấp</button>
+        <button id="btnGoNextDay" type="button" style="flex:1.4;padding:0.85cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">🌅 Sang Ngày ${state.day + 1} (08:00)</button>
+      </div>
+    `);
+    document.getElementById('btnStayNight').onclick = closeModal;
+    document.getElementById('btnGoNextDay').onclick = startNextDay;
+  }
+
+  function startNextDay() {
+    closeModal();
+    state.day += 1;
+    state.minutes = 474;
+    state.dayRevenue = 0;
+    state.dayPenalty = 0;
+    state.dailyCompletedJobs = [];
+    state.dailyQuests = QST.generateDailyQuests(state.day);
+    state.disabledRoomId = null;
+    state.sickStaffRoomId = null;
+    state.clientRateDebuff = 1;
+    state.activeEventTag = '';
+    state.eventTriggeredToday = false;
+    state.overtimeActive = false;
+    state.happyHourCooldown = 0;
+    state.dailyClosed = false;
+    state.lastStockHour = 8;
+    FIN.updateStockPrices(state, EMP.getSeason(state.day).stockBias);
+    AUD.setNight(false);
+    AUD.playSFX('bell');
+    agents.forEach((a, i) => {
+      if (a.role === 'staff') {
+        a.sickToday = false;
+        a.node = 'outside';
+        a.x = CFG.NODES.outside.x;
+        a.y = CFG.NODES.outside.y;
+        a.wait = i * 0.4;
+        sendAgent(a, a.home, '⏰');
+      }
+    });
+    autoSave(); renderHUD(); renderMapOverlays();
+    showToast(`🌅 Ngày ${state.day} bắt đầu! Toàn bộ nhân sự đang vào cửa chấm công.`);
+  }
+
+  // ==================== MODALS ====================
+  function openMarketingModal() {
+    openModal('📣 Trung Tâm Marketing', MKT.buildMarketingModalHTML(state));
+    document.querySelectorAll('[data-run-mkt]').forEach(btn => {
+      btn.onclick = () => {
+        const c = CFG.MARKETING_CAMPAIGNS.find(x => x.id === btn.dataset.runMkt);
+        if (!c || state.marketingCampaign) return;
+        if (state.money < c.cost) return showToast(`Cần ${FIN.fmtMoney(c.cost)} để chạy chiến dịch này!`);
+        state.money -= c.cost;
+        state.stars += c.starsGain;
+        state.brandAwareness = Math.min(100, (state.brandAwareness || 0) + c.brandGain);
+        recordQuestProgress('action', 1);
+        state.marketingCampaign = { id: c.id, name: c.name, icon: c.icon, daysLeft: c.days, spawnBoost: c.spawnBoost, rewardMult: c.rewardMult, vipChance: c.vipChance };
+        AUD.playSFX('unlock'); advanceTutorial(4); autoSave(); renderHUD(); openMarketingModal();
+        showToast(`${TICK_SVG}Đã bật "${c.name}" (+${c.starsGain} ★)!`);
+      };
+    });
+  }
+
+  function openFinanceModal(tab = activeModalTab) {
+    activeModalTab = tab;
+    openModal('🏦 Trung Tâm Tài Chính', FIN.buildFinanceModalHTML(state, activeModalTab));
+    const hasFin = state.rooms.finance.unlocked;
+
+    document.querySelectorAll('[data-fin-tab]').forEach(b => { b.onclick = () => openFinanceModal(b.dataset.finTab); });
+    document.querySelectorAll('[data-take-loan]').forEach(b => {
+      b.onclick = () => {
+        const l = CFG.LOANS.find(x => x.id === b.dataset.takeLoan);
+        if (!l || state.loan) return;
+        const adjPay = hasFin ? Math.round(l.dailyPay * 0.92) : l.dailyPay;
+        state.money += l.amount;
+        state.loan = { name: l.name, dailyPay: adjPay, daysLeft: l.days };
+        AUD.playSFX('cash'); autoSave(); renderHUD(); renderMapOverlays(); openFinanceModal('loan');
+        showToast(`${TICK_SVG}Đã giải ngân ${FIN.fmtMoney(l.amount)}!`);
+      };
+    });
+    document.querySelectorAll('[data-take-fund]').forEach(b => {
+      b.onclick = () => {
+        const f = CFG.FUNDING_ROUNDS.find(x => x.id === b.dataset.takeFund);
+        if (!f || state.fundingTaken.includes(f.id)) return;
+        state.money += f.amount;
+        state.investorEquity = Math.min(45, (state.investorEquity || 0) + f.equity);
+        state.fundingTaken.push(f.id);
+        AUD.playSFX('cash');
+        autoSave(); renderHUD(); renderMapOverlays(); openFinanceModal('funding');
+        showToast(`${TICK_SVG}Nhận vốn ${FIN.fmtMoney(f.amount)} từ ${f.name} (chia ${f.equity}% tiền lời)!`);
+      };
+    });
+    const btnBuyback = document.getElementById('btnBuybackEq');
+    if (btnBuyback) {
+      btnBuyback.onclick = () => {
+        const cost = FIN.getBuyback5Cost(state);
+        if (state.money < cost) return showToast(`Cần ${FIN.fmtMoney(cost)} để mua lại 5% cổ phần!`);
+        state.money -= cost;
+        state.investorEquity = Math.max(0, (state.investorEquity || 0) - 5);
+        AUD.playSFX('unlock');
+        autoSave(); renderHUD(); openFinanceModal('funding');
+        showToast(`${TICK_SVG}Đã mua lại 5% cổ phần! Bạn hiện nắm ${100 - state.investorEquity}% công ty.`);
+      };
+    }
+
+    const btnPayoff = document.getElementById('btnPayoffLoan');
+    if (btnPayoff) {
+      btnPayoff.onclick = () => {
+        const remain = state.loan.dailyPay * state.loan.daysLeft;
+        if (state.money < remain) return showToast('Chưa đủ tiền mặt để tất toán sớm!');
+        state.money -= remain; state.loan = null;
+        AUD.playSFX('unlock'); autoSave(); renderHUD(); openFinanceModal('loan');
+        showToast(`${TICK_SVG}Đã tất toán sạch nợ ngân hàng!`);
+      };
+    }
+    document.querySelectorAll('[data-sav-act]').forEach(b => {
+      b.onclick = () => {
+        const act = b.dataset.savAct;
+        if (act === 'dep_flex_500') {
+          if (state.money < 500) return showToast('Cần $500 để gửi tiết kiệm!');
+          state.money -= 500; state.savings.flex += 500; AUD.playSFX('click');
+        } else if (act === 'wd_flex_all') {
+          if (state.savings.flex <= 0) return;
+          state.money += state.savings.flex; state.savings.flex = 0; AUD.playSFX('cash');
+        } else if (act === 'dep_fixed_1000') {
+          if (state.money < 1000) return showToast('Cần $1,000 để gửi kỳ hạn 3 ngày!');
+          state.money -= 1000; state.savings.fixed += 1000; state.savings.fixedDaysLeft = 3; AUD.playSFX('click');
+        } else if (act === 'wd_fixed_all') {
+          if (state.savings.fixed <= 0) return;
+          const pen = state.savings.fixedDaysLeft > 0 ? 0.92 : 1;
+          state.money += Math.round(state.savings.fixed * pen);
+          state.savings.fixed = 0; state.savings.fixedDaysLeft = 0; AUD.playSFX('cash');
+        }
+        autoSave(); renderHUD(); openFinanceModal('savings');
+      };
+    });
+    document.querySelectorAll('[data-stk-buy], [data-stk-buy5], [data-stk-sell]').forEach(b => {
+      b.onclick = () => {
+        const sym = b.dataset.stkBuy || b.dataset.stkBuy5 || b.dataset.stkSell;
+        const st = state.stocks.find(x => x.symbol === sym);
+        if (!st) return;
+        if (b.dataset.stkBuy || b.dataset.stkBuy5) {
+          const qty = b.dataset.stkBuy5 ? 5 : 1;
+          const cost = st.price * qty;
+          if (state.money < cost) return showToast(`Cần ${FIN.fmtMoney(cost)} để mua ${qty} CP [${sym}]!`);
+          const prevTot = (st.shares || 0) * (st.avgCost || 0);
+          st.shares = (st.shares || 0) + qty;
+          st.avgCost = (prevTot + cost) / st.shares;
+          state.money -= cost; recordQuestProgress('action', 1); AUD.playSFX('click');
+        } else {
+          if (!st.shares) return;
+          const gain = st.shares * st.price;
+          state.money += gain; st.shares = 0; st.avgCost = 0; AUD.playSFX('cash');
+          showToast(`${TICK_SVG}Bán [${sym}] thu về ${FIN.fmtMoney(gain)}!`);
+        }
+        autoSave(); renderHUD(); openFinanceModal('stocks');
+      };
+    });
+  }
+
+  function openIPOModal(tab = activeEmpireTab) {
+    activeEmpireTab = tab;
+    openModal('🌍 Tập Đoàn — Sản Phẩm · M&A · IPO', EMP.buildEmpireModalHTML(state, activeEmpireTab, TICK_SVG));
+
+    document.querySelectorAll('[data-emp-tab]').forEach(b => { b.onclick = () => openIPOModal(b.dataset.empTab); });
+
+    document.querySelectorAll('[data-prod-act]').forEach(b => {
+      b.onclick = () => {
+        const p = CFG.PRODUCTS.find(x => x.id === b.dataset.prodAct);
+        if (!p) return;
+        const lv = (state.products[p.id] || 0);
+        if (lv >= 5) return;
+        const cost = lv === 0 ? p.cost : Math.round(p.cost * Math.pow(1.65, lv));
+        if (state.money < cost) return showToast(`Cần ${FIN.fmtMoney(cost)} để ${lv === 0 ? 'ra mắt' : 'nâng cấp'} ${p.name}!`);
+        state.money -= cost;
+        state.products[p.id] = lv + 1;
+        state.stars += (lv === 0 ? 5 : 2);
+        AUD.playSFX('unlock');
+        autoSave(); renderHUD(); openIPOModal('products');
+        showToast(`${TICK_SVG}${lv === 0 ? 'Đã ra mắt' : 'Đã nâng cấp'} ${p.name} v${lv + 1}.0!`);
+      };
+    });
+
+    document.querySelectorAll('[data-buy-rival]').forEach(b => {
+      b.onclick = () => {
+        const r = CFG.RIVALS.find(x => x.id === b.dataset.buyRival);
+        if (!r || state.acquiredRivals.includes(r.id)) return;
+        if (state.money < r.cost) return showToast(`Cần ${FIN.fmtMoney(r.cost)} để thâu tóm ${r.name}!`);
+        state.money -= r.cost;
+        state.acquiredRivals.push(r.id);
+        state.stars += 8;
+        AUD.playSFX('unlock');
+        autoSave(); renderHUD(); openIPOModal('rivals');
+        showToast(`${TICK_SVG}Thâu tóm thành công ${r.name} (+${r.share}% thị phần & +${FIN.fmtMoney(r.dividend)}/ngày)!`);
+      };
+    });
+
+    const btnIPO = document.getElementById('btnDoIPO');
+    if (btnIPO && !btnIPO.disabled) {
+      btnIPO.onclick = () => {
+        const tickerGuess = (state.companyName.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3) || 'STR');
+        const ipoCash = Math.round(35000 * (100 - (state.investorEquity || 0)) / 100);
+        state.ipoDone = true;
+        state.ticker = tickerGuess;
+        state.money += ipoCash;
+        // List player's own company stock onto the live Stock Market!
+        if (!state.stocks.some(st => st.symbol === tickerGuess)) {
+          state.stocks.unshift({
+            symbol: tickerGuess, name: state.companyName + ' (Của bạn)', price: 100, prevPrice: 100,
+            volatility: 0.08, history: [95, 97, 98, 99, 100], color: '#10B981', shares: 0, avgCost: 0, nextBias: 0.06, isOwn: true
+          });
+        }
+        AUD.playSFX('unlock'); autoSave(); renderHUD(); openIPOModal('ipo');
+        showToast(`${TICK_SVG}${state.companyName} [${tickerGuess}] IPO thành công (+${FIN.fmtMoney(ipoCash)})!`);
+      };
+    }
+
+    document.querySelectorAll('[data-expand-branch]').forEach(b => {
+      b.onclick = () => {
+        const idx = Number(b.dataset.expandBranch);
+        state.branchIdx = idx;
+        state.maxBranchIdx = Math.max(state.maxBranchIdx || 0, idx);
+        state.activeMapIdx = idx;
+        applyBranchMap();
+        AUD.playSFX('unlock'); autoSave(); openIPOModal('ipo');
+        showToast(`${TICK_SVG}Đã chuyển trụ sở sang ${CFG.BRANCHES[idx].name}!`);
+      };
+    });
+    document.querySelectorAll('[data-switch-map]').forEach(b => {
+      b.onclick = () => {
+        const idx = Number(b.dataset.switchMap);
+        state.activeMapIdx = idx;
+        applyBranchMap();
+        AUD.playSFX('click'); autoSave(); openIPOModal('ipo');
+        showToast(`${TICK_SVG}Đã chuyển sang mặt bằng ${CFG.BRANCHES[idx].name}!`);
+      };
+    });
+  }
+
+  function openSettingsModal() {
+    const code = encodeSaveCode(state);
+    openModal('⚙️ Cài Đặt & Mã Khôi Phục', `
+      <div style="display:flex;gap:0.8cqw;margin-bottom:1.1cqw;">
+        <button id="btnToggleBGM" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:${AUD.isBGMEnabled() ? '#059669' : '#E7DFD5'};color:${AUD.isBGMEnabled() ? '#fff' : '#4A3426'};font-weight:800;border:none;cursor:pointer;">
+          🎵 Nhạc nền Chill: ${AUD.isBGMEnabled() ? 'BẬT' : 'TẮT'}
+        </button>
+        <button id="btnToggleSFX" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:${AUD.isSFXEnabled() ? '#D97706' : '#E7DFD5'};color:${AUD.isSFXEnabled() ? '#fff' : '#4A3426'};font-weight:800;border:none;cursor:pointer;">
+          🔔 Hiệu ứng: ${AUD.isSFXEnabled() ? 'BẬT' : 'TẮT'}
+        </button>
+      </div>
+      <div style="padding:1cqw;border-radius:1.1cqw;background:#FAF6F0;border:0.12cqw solid #D8C7B2;">
+        <div style="font-weight:900;color:#3D2B1F;margin-bottom:0.35cqw;">💾 Tự Lưu & Mã Khôi Phục Tài Khoản</div>
+        <p style="font-size:1.05cqw;color:#6B5443;margin:0 0 0.7cqw 0;line-height:1.4;">
+          <strong>1. Sao lưu:</strong> Game tự lưu trên máy này. Bấm <em>Sao chép</em> cất vào Ghi chú/Zalo để chuyển máy.<br/>
+          <strong>2. Khôi phục:</strong> Dán mã <code>STARUP-...</code> vào ô dưới rồi bấm <em>Khôi phục</em>.
+        </p>
+        <div style="display:flex;gap:0.5cqw;margin-bottom:0.75cqw;">
+          <input id="saveCodeOut" type="text" readonly value="${code}" style="flex:1;padding:0.55cqw 0.8cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-family:monospace;font-size:1.0cqw;background:#FFFDF9;color:#4A3426;" />
+          <button id="btnCopyCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">📋 Sao chép</button>
+        </div>
+        <div style="display:flex;gap:0.5cqw;">
+          <input id="saveCodeIn" type="text" placeholder="Dán mã STARUP-... vào đây" style="flex:1;padding:0.55cqw 0.8cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-size:1.05cqw;background:#FFFDF9;" />
+          <button id="btnRestoreCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">Khôi phục</button>
+        </div>
+      </div>
+      <div style="margin-top:0.85cqw;padding:0.8cqw 1cqw;border-radius:1cqw;background:#ECFDF5;border:0.12cqw solid #86EFAC;display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
+        <div style="font-size:1.02cqw;color:#065F46;font-weight:700;">
+          📲 <strong>Cài làm App (PWA Offline):</strong> ${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'Đang chạy ở chế độ App toàn màn hình!' : (window.STARUP_PWA && window.STARUP_PWA.isIOS() ? 'Trên iPhone: bấm nút Chia sẻ (↑) → Thêm vào MH chính.' : 'Cài trực tiếp ra màn hình chính để chơi offline toàn màn hình.')}
+        </div>
+        ${window.STARUP_PWA && window.STARUP_PWA.canInstall() ? '<button id="btnInstallPWASettings" type="button" style="padding:0.52cqw 0.95cqw;border-radius:0.8cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">Cài App ngay</button>' : ''}
+      </div>
+    `);
+    const btnInst = document.getElementById('btnInstallPWASettings');
+    if (btnInst && window.STARUP_PWA) btnInst.onclick = () => window.STARUP_PWA.promptInstall((res) => { if (res === 'accepted') showToast(`${TICK_SVG}Đang cài đặt App STARUP ra màn hình chính!`); });
+    document.getElementById('btnToggleBGM').onclick = () => { AUD.setBGM(!AUD.isBGMEnabled()); openSettingsModal(); };
+    document.getElementById('btnToggleSFX').onclick = () => { AUD.setSFX(!AUD.isSFXEnabled()); openSettingsModal(); };
+    document.getElementById('btnCopyCode').onclick = () => {
+      const inp = document.getElementById('saveCodeOut');
+      inp.select();
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(inp.value).catch(() => document.execCommand('copy'));
+        else document.execCommand('copy');
+      } catch (e) {}
+      showToast(`${TICK_SVG}Đã sao chép mã khôi phục!`);
+    };
+    document.getElementById('btnRestoreCode').onclick = () => {
+      const decoded = decodeSaveCode(document.getElementById('saveCodeIn').value);
+      if (!decoded) return showToast('❌ Mã khôi phục không hợp lệ!');
+      state = decoded; waitingClients = []; agents = [];
+      applyBranchMap(); rebuildStaffAgents(false); autoSave(); closeModal(); renderHUD(); renderMapOverlays(); renderTutorial();
+      showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day}!`);
+    };
+  }
+
+  // ==================== HUD RENDER ====================
+  function renderHUD() {
+    if (!state) return;
+    const phase = getPhase(state.minutes);
+    document.getElementById('hudMoney').textContent = fmtShort(state.money);
+    document.getElementById('hudMoney').style.color = state.money < 0 ? '#DC2626' : '#3D2B1F';
+    document.getElementById('hudStars').textContent = state.stars;
+    document.getElementById('hudCompanyTag').textContent = state.ipoDone ? `[${state.ticker}]` : state.companyName;
+    document.getElementById('clockIcon').textContent = phase.icon;
+    const sea = EMP.getSeason(state.day);
+    document.getElementById('clockText').textContent = `${sea.icon} N${state.day} · ${fmtTime(state.minutes)}`;
+
+    // Ultra-smooth continuous Sunset -> Dusk -> Night transition (15:00 -> 17:30)
+    const m = state.minutes;
+    let sunsetAlpha = 0;
+    if (m >= 900 && m < 1030) {
+      sunsetAlpha = m < 970 ? ((m - 900) / 70) * 0.72 : ((1030 - m) / 60) * 0.72;
+    }
+    const nightAlpha = m >= 950 ? Math.min(1, (m - 950) / 95) : 0;
+    const sunEl = document.getElementById('sunsetOverlay');
+    if (sunEl) sunEl.style.opacity = sunsetAlpha.toFixed(3);
+    document.getElementById('nightMapImg').style.opacity = nightAlpha.toFixed(3);
+
+    // Smooth RGB interpolation of full-bleed background wings (Day #E2DCD3 -> Dusk -> Night #586781)
+    const rBg = Math.round(226 + (88 - 226) * nightAlpha + 10 * sunsetAlpha);
+    const gBg = Math.round(220 + (103 - 220) * nightAlpha - 8 * sunsetAlpha);
+    const bBg = Math.round(211 + (129 - 211) * nightAlpha - 20 * sunsetAlpha);
+    const bgCol = `rgb(${rBg},${gBg},${bBg})`;
+    document.getElementById('appRoot').style.background = bgCol;
+    document.getElementById('gameScreen').style.background = bgCol;
+    AUD.setNight(nightAlpha > 0.55);
+
+    // Update Report Button Badge Pip (pending clients + ready deliveries + active issues)
+    const readyOrIssue = CFG.ROOMS.filter(rc => state.rooms[rc.id].job && (state.rooms[rc.id].job.ready || state.rooms[rc.id].job.issue)).length;
+    const pipCount = waitingClients.filter(c => c.arrived).length + readyOrIssue;
+    const pip = document.getElementById('reportPip');
+    if (pip) {
+      if (pipCount > 0) { pip.textContent = pipCount; pip.classList.remove('hidden'); }
+      else pip.classList.add('hidden');
+    }
+    const qCount = QST.countClaimable(state);
+    const tPip = document.getElementById('trophyPip');
+    if (tPip) {
+      if (qCount > 0) { tPip.textContent = qCount; tPip.classList.remove('hidden'); }
+      else tPip.classList.add('hidden');
+    }
+
+    const mktBanner = document.getElementById('mktBanner');
+    if (state.marketingCampaign) {
+      mktBanner.classList.remove('hidden');
+      mktBanner.textContent = `${state.marketingCampaign.icon} ${state.marketingCampaign.name} (${state.marketingCampaign.daysLeft}N · x${state.marketingCampaign.rewardMult})`;
+    } else mktBanner.classList.add('hidden');
+
+    const evBanner = document.getElementById('eventBanner');
+    if (state.activeEventTag) {
+      evBanner.classList.remove('hidden');
+      evBanner.textContent = state.activeEventTag;
+    } else evBanner.classList.add('hidden');
+
+    const debtBanner = document.getElementById('debtBanner');
+    if (state.debtDays > 0 || state.money < 0) {
+      debtBanner.classList.remove('hidden');
+      debtBanner.textContent = `⚠️ Âm quỹ (${state.debtDays}/2 ngày)`;
+    } else debtBanner.classList.add('hidden');
+
+    const btnP = document.getElementById('btnPrimary');
+    const pIcon = document.getElementById('primaryIcon');
+    const pText = document.getElementById('primaryText');
+    if (phase.key === 'night') {
+      btnP.style.background = 'linear-gradient(180deg,#10B981,#047857)';
+      btnP.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.45), 0 0.42cqw 0 #065F46';
+      pIcon.textContent = '🌅'; pText.textContent = `Sang Ngày ${state.day + 1}`;
+    } else if (phase.key === 'sunset' && !state.overtimeActive) {
+      btnP.style.background = 'linear-gradient(180deg,#F43F5E,#BE123C)';
+      btnP.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.45), 0 0.42cqw 0 #881337';
+      pIcon.textContent = '🧋'; pText.textContent = 'Tăng ca +1h';
+    } else if (state.happyHourLeft > 0) {
+      btnP.style.background = 'linear-gradient(180deg,#FBBF24,#D97706)';
+      btnP.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.45), 0 0.42cqw 0 #92400E';
+      pIcon.textContent = '⚡'; pText.textContent = `x2 (${Math.ceil(state.happyHourLeft)}s)`;
+    } else if (state.happyHourCooldown > 0) {
+      btnP.style.background = 'linear-gradient(180deg,#C8BEB3,#A89D91)';
+      btnP.style.boxShadow = '0 0.34cqw 0 #7C7166';
+      pIcon.textContent = '⏳'; pText.textContent = `Chờ (${Math.ceil(state.happyHourCooldown)}s)`;
+    } else {
+      btnP.style.background = 'linear-gradient(180deg,#F59E0B,#D97706)';
+      btnP.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.45), 0 0.42cqw 0 #92400E';
+      pIcon.textContent = '☕'; pText.textContent = 'Trà Chiều x2';
+    }
+    // FIX P2 #5: Live sync Room Upgrade Drawer button states when money changes
+    if (state.selectedRoom && lastDrawerMoney !== state.money) {
+      lastDrawerMoney = state.money;
+      renderDrawer();
+    }
+  }
+
+  // ==================== 60FPS GAME LOOP ====================
+  let lastPhase = 'open';
+  let clientSpawnCooldown = 1.4;
+
+  function tick(now) {
+    const rawDt = Math.min(0.08, (now - lastTs) / 1000);
+    lastTs = now;
+
+    if (state && document.getElementById('introOverlay').classList.contains('hidden')) {
+      const modalOpen = !document.getElementById('modalOverlay').classList.contains('hidden');
+      const simMult = (state.speed === 0 || modalOpen) ? 0 : state.speed;
+      const dt = rawDt * simMult;
+
+      if (dt > 0) {
+        if (state.happyHourLeft > 0) state.happyHourLeft = Math.max(0, state.happyHourLeft - rawDt);
+        else if (state.happyHourCooldown > 0) state.happyHourCooldown = Math.max(0, state.happyHourCooldown - rawDt);
+
+        const tutPace = (state.tutorialStep === 1 || state.tutorialStep === 2) ? 0.35 : 1.0;
+        if (state.minutes < 1075) state.minutes += dt * 2.4 * tutPace;
+
+        const currHour = Math.floor(state.minutes / 60);
+        if (currHour >= state.lastStockHour + 2 && currHour <= 17) {
+          state.lastStockHour = currHour;
+          FIN.updateStockPrices(state, EMP.getSeason(state.day).stockBias);
+        }
+
+        if (state.day >= 2 && !state.eventTriggeredToday && state.minutes >= 600 && state.minutes < 880) {
+          if (Math.random() < dt * 0.08) triggerRandomEvent();
+        }
+
+        const phase = getPhase(state.minutes);
+        if (phase.key !== lastPhase) {
+          lastPhase = phase.key;
+          if (phase.key === 'lunch') {
+            showToast('🍚 12:00 Nghỉ trưa — Nhân viên ra khu Pantry/Sảnh nghỉ ngơi!');
+            agents.forEach((a, i) => {
+              if (a.role === 'staff' && !a.sickToday) {
+                const lunchSpots = state.rooms.pantry.unlocked ? ['pantryBar', 'pantryTable', 'vending'] : ['sofa', 'lobby'];
+                sendAgent(a, lunchSpots[i % lunchSpots.length], i % 2 === 0 ? '🍚' : '☕');
+              }
+            });
+            dismissAllClients();
+          } else if (phase.key === 'afternoon') {
+            showToast('🌤️ 13:00 — Trở lại ca chiều!');
+            agents.forEach(a => { if (a.role === 'staff' && !a.sickToday) sendAgent(a, a.home, '💻'); });
+          } else if (phase.key === 'night') {
+            processEndOfDay();
+          }
+        }
+
+        // Spawn up to 2–3 concurrent clients
+        if (phase.key === 'morning' || phase.key === 'afternoon' || phase.key === 'sunset') {
+          const mktBoost = state.marketingCampaign ? state.marketingCampaign.spawnBoost : 1;
+          clientSpawnCooldown -= dt * mktBoost * (state.clientRateDebuff || 1) * EMP.getSeason(state.day).spawnMult;
+          if (clientSpawnCooldown <= 0) {
+            spawnClientIfNeeded();
+            const wc = getUnlockedWorkCount();
+            if (wc <= 1) clientSpawnCooldown = 22 + Math.random() * 4;
+            else if (wc <= 3) clientSpawnCooldown = 16 + Math.random() * 4;
+            else clientSpawnCooldown = 11 + Math.random() * 3;
+          }
+        }
+
+        // Patience countdown for all waiting clients
+        if (state.tutorialStep !== 1) {
+          const expired = [];
+          waitingClients.forEach(c => {
+            if (!c.arrived) return;
+            c.patience -= dt;
+            if (c.patience <= 0) expired.push(c.id);
+          });
+          expired.forEach(cid => {
+            state.stars = Math.max(0, state.stars - 2);
+            state.morale = Math.max(20, state.morale - 4);
+            AUD.playSFX('alert');
+            showToast('😤 Khách chờ quá lâu đã bỏ về! (-2 ★)');
+            dismissClient(cid, false);
+          });
+        }
+
+        let overlayDirty = false;
+        // Manager Automation (Lobby auto-accepts normal contracts; Rooms auto-fix & auto-deliver!)
+        if (state.rooms.lobby.hasManager) {
+          waitingClients.forEach(c => {
+            if (c.arrived && c.tier === 'normal' && c.patience < 10) acceptClientById(c.id);
+          });
+        }
+        if (state.rooms.pantry.unlocked && state.rooms.pantry.hasManager && state.morale < 85) {
+          state.morale = 85;
+        }
+        CFG.ROOMS.forEach(rc => {
+          const rs = state.rooms[rc.id];
+          if (!rs.unlocked || !rs.hasManager || !rs.job) return;
+          if (rs.job.issue) { rs.job.issue = null; overlayDirty = true; }
+          if (rs.job.ready) { deliverRoomJob(rc.id); overlayDirty = true; }
+        });
+
+        // Advance active room jobs
+        const moraleMult = state.morale >= 80 ? 1.15 : (state.morale < 45 ? 0.8 : 1.0);
+        CFG.ROOMS.forEach(rc => {
+          const rs = state.rooms[rc.id];
+          if (!rs.unlocked || !rs.job || rs.job.ready || rs.job.issue || state.disabledRoomId === rc.id) return;
+          if (phase.key === 'lunch' || phase.key === 'night') return;
+
+          const hhBoost = state.happyHourLeft > 0 ? 2 : 1;
+          const pantryBoost = (state.rooms.pantry.unlocked && phase.key === 'afternoon') ? 1.25 : 1;
+          rs.job.progress += (100 / rs.job.duration) * dt * hhBoost * pantryBoost * moraleMult;
+
+          if (!rs.job.issueChecked && rs.job.progress >= 50) {
+            rs.job.issueChecked = true;
+            const baseChance = state.rooms.pantry.unlocked ? 0.16 : 0.30;
+            const chance = state.tutorialStep === 2 ? 0.85 : baseChance;
+            if (Math.random() < chance) {
+              rs.job.issue = (rc.id === 'tech' && Math.random() < 0.6) ? 'server' : 'coffee';
+              AUD.playSFX('alert');
+              overlayDirty = true;
+            }
+          }
+
+          if (rs.job.progress >= 100) {
+            rs.job.progress = 100;
+            rs.job.ready = true;
+            AUD.playSFX('bell');
+            overlayDirty = true;
+          }
+        });
+
+        const moveBoost = state.happyHourLeft > 0 ? 1.45 : 1;
+        agents.forEach(a => {
+          const el = document.getElementById('ag-' + a.id);
+          if (!el) return;
+          if (a.path.length > 0) {
+            const nxtKey = a.path[0];
+            const tgt = CFG.NODES[nxtKey];
+            const dx = tgt.x - a.x, dy = tgt.y - a.y;
+            const dist = Math.hypot(dx, dy);
+            const step = a.speed * moveBoost * dt;
+            if (dist <= step) {
+              a.x = tgt.x; a.y = tgt.y; a.node = nxtKey; a.path.shift();
+              if (a.role === 'client') {
+                const wc = waitingClients.find(c => c.id === a.id);
+                if (wc && a.path.length === 0) { wc.arrived = true; overlayDirty = true; }
+              }
+            } else {
+              a.x += (dx / dist) * step;
+              a.y += (dy / dist) * step;
+            }
+            el.classList.add('walking'); el.classList.remove('idle');
+          } else {
+            el.classList.remove('walking'); el.classList.add('idle');
+            if (a.role === 'staff' && phase.key !== 'night' && !a.sickToday) {
+              a.wait -= dt;
+              if (a.wait <= 0) {
+                if (phase.key === 'lunch') {
+                  const spots = state.rooms.pantry.unlocked ? ['pantryBar', 'pantryTable', 'vending'] : ['sofa', 'lobby'];
+                  sendAgent(a, spots[Math.floor(Math.random() * spots.length)], '🍚');
+                  a.wait = 2.8 + Math.random() * 2;
+                } else if (a.node !== a.home) {
+                  sendAgent(a, a.home, '💻');
+                  a.wait = 4.0 + Math.random() * 3;
+                } else if (!state.rooms[a.roomId].job && Math.random() < 0.5) {
+                  const walkTarget = state.rooms.pantry.unlocked ? 'pantryBar' : 'lobby';
+                  sendAgent(a, walkTarget, walkTarget === 'pantryBar' ? '☕' : '💬');
+                  a.wait = 2.0 + Math.random() * 1.5;
+                } else a.wait = 2.8;
+              }
+            }
+          }
+          el.style.left = a.x.toFixed(2) + '%';
+          el.style.top = a.y.toFixed(2) + '%';
+          el.style.opacity = (a.node === 'outside' && a.path.length === 0) ? '0' : '1';
+          el.querySelector('.token-badge').textContent = a.badge;
+        });
+
+        // Clean up exited clients
+        agents = agents.filter(a => !(a.role === 'client' && a.node === 'outside' && a.path.length === 0 && !waitingClients.some(c => c.id === a.id)));
+
+        banterCooldown -= dt;
+        if (banterCooldown <= 0) {
+          banterCooldown = 7 + Math.random() * 4.5;
+          spawnStaffBanter(phase.key === 'morning' || phase.key === 'afternoon' || phase.key === 'sunset' ? 'work' : phase.key);
+        }
+        hudAccum += rawDt;
+        if (hudAccum >= 0.3) { hudAccum = 0; renderHUD(); renderMapOverlays(); }
+        else if (overlayDirty) renderMapOverlays();
+      }
+    }
+    rafId = requestAnimationFrame(tick);
+  }
+
+  // ==================== INTRO SCREEN ====================
+  function showIntroScreen() {
+    const saved = loadSavedFromStorage();
+    document.getElementById('introOverlay').classList.remove('hidden');
+
+    let chosenAvatar = 'ceo';
+    document.getElementById('introContent').innerHTML = `
+      <div>
+        <div style="display:inline-block;padding:0.25cqw 0.85cqw;border-radius:999px;background:#FEF3C7;color:#92400E;font-size:1.05cqw;font-weight:800;margin-bottom:0.45cqw;">GAME KINH DOANH 16:9</div>
+        <h1 style="margin:0;font-size:3.1cqw;font-weight:900;letter-spacing:-0.03em;color:#3D2B1F;">STARUP</h1>
+        <p style="margin:0.35cqw 0 1.1cqw 0;font-size:1.18cqw;color:#6B5443;line-height:1.4;">Chốt đơn tại sảnh, mở Phòng Tài Chính & Marketing, xoay dòng tiền chứng khoán và vượt qua biến cố để lên sàn <strong>IPO</strong>!</p>
+
+        ${saved ? `
+          <button id="btnContinueSave" type="button" style="width:100%;margin-bottom:0.8cqw;padding:0.9cqw;border-radius:1.1cqw;background:linear-gradient(180deg,#10B981,#047857);color:#fff;font-size:1.3cqw;font-weight:800;border:none;box-shadow:0 0.3cqw 0 #065F46;cursor:pointer;">
+            ▶️ Tiếp tục: ${saved.companyName} (Ngày ${saved.day} · ${FIN.fmtMoney(saved.money)})
+          </button>
+        ` : ''}
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75cqw;margin-bottom:0.85cqw;">
+          <div>
+            <label style="display:block;font-size:1.02cqw;font-weight:800;color:#5C4636;margin-bottom:0.25cqw;">Tên CEO</label>
+            <input id="inpCeoName" type="text" value="Minh Founder" maxlength="20" style="width:100%;padding:0.62cqw 0.85cqw;border-radius:0.85cqw;border:0.14cqw solid #D8C7B2;background:#FFFDF9;color:#3D2B1F;font-size:1.18cqw;font-weight:700;" />
+          </div>
+          <div>
+            <label style="display:block;font-size:1.02cqw;font-weight:800;color:#5C4636;margin-bottom:0.25cqw;">Tên Công Ty</label>
+            <input id="inpCompName" type="text" value="Nova Tech" maxlength="20" style="width:100%;padding:0.62cqw 0.85cqw;border-radius:0.85cqw;border:0.14cqw solid #D8C7B2;background:#FFFDF9;color:#3D2B1F;font-size:1.18cqw;font-weight:700;" />
+          </div>
+        </div>
+
+        <div style="margin-bottom:1.1cqw;">
+          <div style="font-size:1.02cqw;font-weight:800;color:#5C4636;margin-bottom:0.4cqw;">Chọn diện mạo CEO</div>
+          <div id="avatarPicker" style="display:flex;gap:0.85cqw;">
+            ${AVA.CEO_CHOICES.map(c => `
+              <button data-pick-ava="${c.key}" type="button" style="width:5.2cqw;height:5.2cqw;padding:0.2cqw;border-radius:999px;border:0.25cqw solid ${c.key === chosenAvatar ? '#D97706' : 'transparent'};background:#F4ECE0;cursor:pointer;overflow:hidden;">
+                ${AVA.renderTokenImg(c.key, c.label)}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+
+        <div style="display:flex;gap:0.75cqw;">
+          <button id="btnStartNew" type="button" style="flex:1.6;padding:0.95cqw;border-radius:1.1cqw;background:linear-gradient(180deg,#D97706,#B45309);color:#FFFDF9;font-size:1.32cqw;font-weight:900;border:none;box-shadow:0 0.32cqw 0 #78350F;cursor:pointer;">
+            🚀 Bắt Đầu Khởi Nghiệp
+          </button>
+          <button id="btnIntroRestore" type="button" style="flex:1;padding:0.95cqw;border-radius:1.1cqw;background:#F4ECE0;color:#4A3426;font-size:1.18cqw;font-weight:800;border:0.13cqw solid #D8C7B2;cursor:pointer;">
+            🔑 Nhập Mã Lưu
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.querySelectorAll('[data-pick-ava]').forEach(btn => {
+      btn.onclick = () => {
+        chosenAvatar = btn.dataset.pickAva;
+        document.querySelectorAll('[data-pick-ava]').forEach(b => { b.style.borderColor = (b.dataset.pickAva === chosenAvatar) ? '#D97706' : 'transparent'; });
+      };
+    });
+    const btnCont = document.getElementById('btnContinueSave');
+    if (btnCont && saved) btnCont.onclick = () => { state = saved; beginGameplay(false); };
+    document.getElementById('btnStartNew').onclick = () => {
+      const ceo = document.getElementById('inpCeoName').value.trim() || 'Minh Founder';
+      const comp = document.getElementById('inpCompName').value.trim() || 'Nova Tech';
+      state = createFreshState(ceo, comp, chosenAvatar);
+      beginGameplay(true);
+    };
+    document.getElementById('btnIntroRestore').onclick = () => {
+      openModal('🔑 Khôi Phục Tiến Độ Bằng Mã', `
+        <p style="color:#6B5443;margin:0 0 0.8cqw 0;">Dán mã <code>STARUP-...</code> bạn đã sao lưu vào ô dưới đây:</p>
+        <input id="introCodeInp" type="text" placeholder="STARUP-..." style="width:100%;padding:0.75cqw;border-radius:0.9cqw;border:0.14cqw solid #D8C7B2;font-size:1.15cqw;margin-bottom:0.9cqw;" />
+        <button id="btnConfirmIntroRestore" type="button" style="width:100%;padding:0.85cqw;border-radius:0.95cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Khôi phục & Vào Game</button>
+      `);
+      document.getElementById('btnConfirmIntroRestore').onclick = () => {
+        const decoded = decodeSaveCode(document.getElementById('introCodeInp').value);
+        if (!decoded) return showToast('❌ Mã không hợp lệ!');
+        state = decoded; closeModal(); beginGameplay(false);
+      };
+    };
+  }
+
+  function beginGameplay(isNew) {
+    document.getElementById('introOverlay').classList.add('hidden');
+    AUD.startBGM();
+    AUD.playSFX('bell');
+    waitingClients = [];
+    agents = [];
+    lastPhase = getPhase(state.minutes).key;
+    applyBranchMap();
+    rebuildStaffAgents(isNew);
+    autoSave(); renderHUD(); renderMapOverlays(); renderTutorial();
+    if (isNew) {
+      clientSpawnCooldown = 2.5;
+      showToast(`🎉 Chào mừng CEO ${state.ceoName} đến với ${state.companyName}!`);
+    }
+  }
+
+  // ==================== BOOT & BINDINGS ====================
+  function init() {
+    document.getElementById('btnForceLandscape').onclick = () => {
+      try {
+        if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+        if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+      } catch (e) {}
+      document.body.classList.add('bypass-portrait');
+    };
+    document.getElementById('btnBypassPortrait').onclick = () => document.body.classList.add('bypass-portrait');
+    document.getElementById('btnCloseModal').onclick = closeModal;
+    document.getElementById('btnCloseDrawer').onclick = () => { state.selectedRoom = null; renderMapOverlays(); renderDrawer(); };
+    document.getElementById('btnSkipTutorial').onclick = () => { if (state) { state.tutorialStep = 0; renderTutorial(); autoSave(); } };
+    document.getElementById('btnSpeed').onclick = () => {
+      if (!state) return;
+      state.speed = state.speed === 1 ? 2 : (state.speed === 2 ? 3 : (state.speed === 3 ? 0 : 1));
+      document.getElementById('btnSpeed').textContent = state.speed === 0 ? '⏸' : state.speed + 'x';
+      AUD.playSFX('click');
+    };
+    document.getElementById('btnNews').onclick = () => {
+      if (!state) return;
+      openModal('📰 Tin Nóng Thị Trường', `
+        <div style="padding:1.1cqw;border-radius:1.1cqw;background:#FEF3C7;color:#92400E;font-weight:800;line-height:1.45;">${state.newsHint}</div>
+        <p style="margin-top:0.9cqw;color:#6B5443;">Mở <strong>Phòng Tài Chính</strong> để xem mũi tên dự báo xu hướng cổ phiếu trong mục <strong>🏦 Tài Chính</strong>.</p>
+      `);
+    };
+    document.getElementById('btnReport').onclick = () => openReportModal('pending');
+    document.getElementById('btnFinance').onclick = () => openFinanceModal('loan');
+    document.getElementById('btnMarketing').onclick = openMarketingModal;
+    document.getElementById('btnIPO').onclick = openIPOModal;
+    document.getElementById('btnSettings').onclick = openSettingsModal;
+    document.getElementById('btnTrophy').onclick = () => openTrophyModal('quests');
+    document.getElementById('btnPrimary').onclick = () => {
+      if (!state) return;
+      const phase = getPhase(state.minutes);
+      if (phase.key === 'night') startNextDay();
+      else if (phase.key === 'sunset' && !state.overtimeActive) {
+        if (state.money < 200) return showToast('Cần $200 tiền mặt để mời trà sữa tăng ca!');
+        state.overtimeActive = true; state.money -= 200; state.morale = Math.max(30, state.morale - 12); AUD.playSFX('click');
+        showToast('🧋 Đã mời trà sữa (-$200)! Tăng ca đến 18:00 (-12% Tinh thần).');
+      } else if (state.happyHourLeft > 0) {
+        showToast(`⚡ Giờ Trà Chiều đang chạy (còn ${Math.ceil(state.happyHourLeft)}s)!`);
+      } else if (state.happyHourCooldown > 0) {
+        showToast(`⏳ Trà Chiều đang hồi chiêu (còn ${Math.ceil(state.happyHourCooldown)}s)!`);
+      } else {
+        state.happyHourLeft = 20; state.happyHourCooldown = 75; state.morale = Math.min(100, state.morale + 10); AUD.playSFX('unlock');
+        showToast(`${TICK_SVG}Giờ Trà Chiều! Nhân viên x2 tốc độ trong 20 giây.`);
+      }
+      renderHUD();
+    };
+
+    window.addEventListener('beforeunload', () => { if (rafId) cancelAnimationFrame(rafId); AUD.stopBGM(); });
+
+    showIntroScreen();
+    lastTs = performance.now();
+    rafId = requestAnimationFrame(tick);
+  }
+
+  return { init };
+})();
+
+window.addEventListener('load', () => window.STARUP_ENGINE.init());
