@@ -71,6 +71,9 @@ window.STARUP_ENGINE = (() => {
       dailyCompletedJobs: [],
       eventTriggeredToday: false,
       lastPowerOutageDay: -10,
+      lastStaffSickDay: -10,
+      lastMacroWaveDay: -10,
+      lastSickRoomId: '',
       lastEventKind: '',
       isBankrupt: false,
       overtimeActive: false,
@@ -117,7 +120,9 @@ window.STARUP_ENGINE = (() => {
         st.contractsDone || 0, st.debtDays || 0, st.tutorialStep || 0, Math.round(st.dayRevenue || 0),
         st.ipoDone ? 1 : 0, st.ticker || '', st.branchIdx || 0, st.maxBranchIdx || 0, st.activeMapIdx || 0,
         st.investorEquity || 0, st.overtimeActive ? 1 : 0, Math.round(st.happyHourLeft || 0),
-        Math.round(st.happyHourCooldown || 0), st.dailyClosed ? 1 : 0, st.lastPowerOutageDay || -10
+        Math.round(st.happyHourCooldown || 0), st.dailyClosed ? 1 : 0, st.lastPowerOutageDay || -10,
+        st.lastEventKind || '', st.lastStaffSickDay !== undefined ? st.lastStaffSickDay : -10,
+        st.lastMacroWaveDay !== undefined ? st.lastMacroWaveDay : -10, st.lastSickRoomId || ''
       ],
       r: rm,
       l: st.loan ? [st.loan.name, st.loan.dailyPay, st.loan.daysLeft] : 0,
@@ -156,6 +161,10 @@ window.STARUP_ENGINE = (() => {
     baseSt.happyHourCooldown = g[20] || 0;
     baseSt.dailyClosed = !!g[21];
     baseSt.lastPowerOutageDay = g[22] !== undefined ? g[22] : -10;
+    baseSt.lastEventKind = typeof g[23] === 'string' ? g[23] : '';
+    baseSt.lastStaffSickDay = g[24] !== undefined ? g[24] : -10;
+    baseSt.lastMacroWaveDay = g[25] !== undefined ? g[25] : -10;
+    baseSt.lastSickRoomId = typeof g[26] === 'string' ? g[26] : '';
 
     if (d.r) {
       CFG.ROOMS.forEach(rc => {
@@ -537,7 +546,7 @@ window.STARUP_ENGINE = (() => {
     if (!state || state.tutorialStep <= 0) { banner.classList.add('hidden'); return; }
     const steps = {
       1: 'Bước 1/4: Chạm nút 📋 trên đầu Khách ở Sảnh để nhận hợp đồng (chú ý: để khách chờ hết giờ sẽ rời đi và trừ −2 ★)!',
-      2: 'Bước 2/4: Nhân viên đang làm! Nếu hiện ☕/🔧 hãy chạm xử lý, xong bấm 💵 để thu tiền.',
+      2: 'Bước 2/4: Nhân viên đang làm! Nếu đơn dừng ở 50% (đuối sức/ốm), bấm nút "☕ Pha Cà Phê!" hoặc "🔧 Sửa Server!" cạnh phòng để gỡ kẹt, xong bấm 💵 thu tiền.',
       3: 'Bước 3/4: Giỏi lắm! Thử 📣 Marketing kéo khách VIP, hoặc mở Khu Pantry ($750) & Phòng Tài Chính ($1,600)!',
       4: 'Bước 4/4: Chú ý Đơn Hỏa Tốc ⚡ (phải giao trước 17:00) và Biến cố từ Ngày 2 trở đi. Chúc CEO thành công!'
     };
@@ -1083,7 +1092,13 @@ window.STARUP_ENGINE = (() => {
       if (rs.job) {
         const pct = Math.min(100, Math.floor(rs.job.progress || 0));
         jobBox.classList.remove('hidden');
-        document.getElementById('drJobTitle').textContent = rs.job.ready ? '✅ Sẵn sàng bàn giao: ' + rs.job.title : '📋 ' + rs.job.title;
+        document.getElementById('drJobTitle').textContent = rs.job.ready
+          ? '✅ Sẵn sàng bàn giao: ' + rs.job.title
+          : (rs.job.issue === 'server'
+              ? '⏸️ Đang tạm dừng (bấm 🔧 Sửa Server!): ' + rs.job.title
+              : (rs.job.issue === 'coffee'
+                  ? '⏸️ Đang tạm dừng (bấm ☕ Pha Cà Phê!): ' + rs.job.title
+                  : '📋 ' + rs.job.title));
         document.getElementById('drJobPct').textContent = pct + '%';
         document.getElementById('drJobBar').style.width = pct + '%';
       } else {
@@ -1187,8 +1202,10 @@ window.STARUP_ENGINE = (() => {
     const workRooms = CFG.ROOMS.filter(r => r.baseReward > 0 && state.rooms[r.id].unlocked);
     const targetRoom = workRooms[Math.floor(Math.random() * workRooms.length)] || CFG.ROOMS[1];
 
-    const pool = ['staff_sick', 'tax_audit', 'macro_wave'];
-    if ((state.day - (state.lastPowerOutageDay || -10)) >= 6) pool.push('power_outage');
+    const pool = ['tax_audit', 'industry_boom', 'partner_promo'];
+    if ((state.day - (state.lastPowerOutageDay !== undefined ? state.lastPowerOutageDay : -10)) >= 6) pool.push('power_outage');
+    if ((state.day - (state.lastStaffSickDay !== undefined ? state.lastStaffSickDay : -10)) >= 6) pool.push('staff_sick');
+    if ((state.day - (state.lastMacroWaveDay !== undefined ? state.lastMacroWaveDay : -10)) >= 4) pool.push('macro_wave');
     const nonDupPool = pool.filter(k => k !== state.lastEventKind);
     const activePool = nonDupPool.length ? nonDupPool : pool;
     const kind = activePool[Math.floor(Math.random() * activePool.length)];
@@ -1216,24 +1233,30 @@ window.STARUP_ENGINE = (() => {
         closeModal(); showToast(`⚡ ${targetRoom.name} đã tạm khóa trên bản đồ!`); renderHUD(); renderMapOverlays();
       };
     } else if (kind === 'staff_sick') {
-      openModal(`🤒 Biến Cố: Nhân viên ${targetRoom.name} xin nghỉ ốm`, `
-        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Một nhân sự ở <strong>${targetRoom.name}</strong> bị cảm nặng và xin về nhà nghỉ hôm nay, làm giảm tốc độ xử lý của phòng.</p>
+      const altRooms = workRooms.filter(r => r.id !== state.lastSickRoomId);
+      const sickRoom = altRooms.length ? altRooms[Math.floor(Math.random() * altRooms.length)] : targetRoom;
+      state.lastStaffSickDay = state.day;
+      state.lastSickRoomId = sickRoom.id;
+      autoSave();
+      const targetRoomSick = sickRoom;
+      openModal(`🤒 Biến Cố: Nhân viên ${targetRoomSick.name} xin nghỉ ốm`, `
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Một nhân sự ở <strong>${targetRoomSick.name}</strong> bị cảm nặng và xin về nhà nghỉ hôm nay, làm giảm tốc độ xử lý của phòng. <em>(Mẹo: Nếu đơn bị tạm dừng ở 50%, bấm nút "☕ Pha Cà Phê!" cạnh phòng để gỡ kẹt và chạy tiếp.)</em></p>
         <div style="display:flex;flex-direction:column;gap:0.7cqw;">
           <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Chi $260 thuê CTV làm thay + thăm hỏi (+5% Tinh thần)</button>
-          <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;text-align:left;">B. Cho nhân viên về nghỉ (giảm công suất ${targetRoom.name} hôm nay)</button>
+          <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;text-align:left;">B. Cho nhân viên về nghỉ (giảm công suất ${targetRoomSick.name} hôm nay)</button>
         </div>
       `);
       document.getElementById('evA').onclick = () => {
         if (state.money < 260) return showToast('Không đủ $260 tiền mặt — hãy chọn phương án B!');
         state.money -= 260; state.morale = Math.min(100, state.morale + 5);
-        closeModal(); showToast(`${TICK_SVG}Đã bố trí CTV thay thế & cả team rất vui (+5% Tinh thần)!`); renderHUD();
+        closeModal(); autoSave(); showToast(`${TICK_SVG}Đã bố trí CTV thay thế & cả team rất vui (+5% Tinh thần)!`); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
-        state.sickStaffRoomId = targetRoom.id;
-        state.activeEventTag = `🤒 ${targetRoom.name} thiếu 1 nhân sự hôm nay`;
-        const ag = agents.find(a => a.role === 'staff' && a.roomId === targetRoom.id);
+        state.sickStaffRoomId = targetRoomSick.id;
+        state.activeEventTag = `🤒 ${targetRoomSick.name} thiếu 1 nhân sự hôm nay`;
+        const ag = agents.find(a => a.role === 'staff' && a.roomId === targetRoomSick.id);
         if (ag) { ag.sickToday = true; sendAgent(ag, 'outside', '🤒'); }
-        closeModal(); showToast(`🤒 Nhân viên ${targetRoom.name} đang ra cửa về nhà nghỉ ngơi.`); renderHUD();
+        closeModal(); autoSave(); showToast(`🤒 Nhân viên ${targetRoomSick.name} về nghỉ hôm nay. Nếu đơn dừng ở 50%, bấm "☕ Pha Cà Phê!" cạnh phòng để gỡ kẹt!`); renderHUD();
       };
     } else if (kind === 'tax_audit') {
       openModal('🧾 Biến Cố: Thanh Tra Thuế & Sổ Sách Ghé Thăm', `
@@ -1257,7 +1280,55 @@ window.STARUP_ENGINE = (() => {
         document.getElementById('evA').onclick = () => { if (state.money < 420) return showToast('Không đủ $420 tiền mặt — hãy chọn phương án B!'); state.money -= 420; closeModal(); showToast('Đã nộp phạt bổ sung -$420. Hãy sớm mở Phòng Tài Chính!'); renderHUD(); };
         document.getElementById('evB').onclick = () => { state.stars = Math.max(0, state.stars - 4); closeModal(); showToast('Đã gia hạn giải trình (-4 ★ Uy tín).'); renderHUD(); };
       }
+    } else if (kind === 'industry_boom') {
+      autoSave();
+      openModal('🚀 Cơ Hội Thị Trường: Làn Sóng Khách Hàng Mới', `
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Nhu cầu thị trường bất ngờ tăng mạnh hôm nay! Cổ phiếu <strong>[TECH] tăng +12%</strong> và khách hàng sẵn sàng chi tiêu nhiều hơn.</p>
+        <div style="display:flex;flex-direction:column;gap:0.7cqw;">
+          <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Tận dụng sóng tự nhiên (Miễn phí · +10% Tinh thần & +2 ★)</button>
+          <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#EA580C;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">B. Chi $180 đẩy quảng bá chớp nhoáng (+4 ★ & +30% khách hôm nay)</button>
+        </div>
+      `);
+      FIN.updateStockPrices(state, { TECH: 0.12, REAL: 0.05 });
+      addNews('🚀 Làn sóng nhu cầu mới: [TECH] tăng mạnh +12%, thị trường khởi sắc!');
+      document.getElementById('evA').onclick = () => {
+        state.morale = Math.min(100, state.morale + 10);
+        state.stars += 2;
+        state.activeEventTag = '🚀 Thị trường khởi sắc (+10% Tinh thần)';
+        closeModal(); autoSave(); showToast(`${TICK_SVG}Đội ngũ hứng khởi đón sóng thị trường (+10% Tinh thần & +2 ★)!`); renderHUD();
+      };
+      document.getElementById('evB').onclick = () => {
+        if (state.money < 180) return showToast('Không đủ $180 tiền mặt — hãy chọn phương án A!');
+        state.money -= 180; state.stars += 4;
+        state.clientRateDebuff = 1.3;
+        state.activeEventTag = '🚀 Quảng bá chớp nhoáng (+30% khách hôm nay)';
+        closeModal(); autoSave(); showToast(`${TICK_SVG}Khách hàng đổ về sảnh! +4 ★ & +30% khách hôm nay!`); renderHUD();
+      };
+    } else if (kind === 'partner_promo') {
+      autoSave();
+      openModal('🤝 Cơ Hội Đối Tác: Giới Thiệu Khách Hàng', `
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Một doanh nghiệp đối tác đánh giá cao <strong>${state.companyName}</strong> và đề nghị hợp tác giới thiệu khách hàng chéo trong hôm nay.</p>
+        <div style="display:flex;flex-direction:column;gap:0.7cqw;">
+          <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Nhận hoa hồng giới thiệu ngay (+$120 & +1 ★)</button>
+          <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#2563EB;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">B. Chi $150 đồng tài trợ hội thảo (+5% Thương hiệu & +3 ★)</button>
+        </div>
+      `);
+      document.getElementById('evA').onclick = () => {
+        state.money += 120; state.stars += 1; AUD.playSFX('cash');
+        state.activeEventTag = '🤝 Đối tác giới thiệu (+$120)';
+        closeModal(); autoSave(); showToast(`${TICK_SVG}Nhận hoa hồng đối tác +$120 & +1 ★!`); renderHUD();
+      };
+      document.getElementById('evB').onclick = () => {
+        if (state.money < 150) return showToast('Không đủ $150 tiền mặt — hãy chọn phương án A!');
+        state.money -= 150;
+        state.brandAwareness = Math.min(100, (state.brandAwareness || 0) + 5);
+        state.stars += 3;
+        state.activeEventTag = '🤝 Đồng tài trợ hội thảo (+5% Thương hiệu)';
+        closeModal(); autoSave(); showToast(`${TICK_SVG}Thương hiệu lan tỏa (+5% Nhận diện & +3 ★)!`); renderHUD();
+      };
     } else {
+      state.lastMacroWaveDay = state.day;
+      autoSave();
       openModal('📉 Biến Cố Vĩ Mô: Thị Trường Rung Lắc Mạnh', `
         <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Kinh tế chung chững lại trong ngày: lượng khách ghé sảnh giảm 30%, mã <strong>[TECH]/[REAL]</strong> giảm điểm nhưng <strong>[GOLD] tăng vọt +16%</strong>!</p>
         <div style="display:flex;flex-direction:column;gap:0.7cqw;">
@@ -1410,7 +1481,7 @@ window.STARUP_ENGINE = (() => {
         </div>
       </div>
       ${keptJobsCount > 0 ? `<div style="margin-top:0.65cqw;padding:0.55cqw 0.85cqw;border-radius:0.85cqw;background:#EFF6FF;color:#1E40AF;font-weight:700;font-size:1.05cqw;">📋 Có ${keptJobsCount} hợp đồng đang làm dở được giữ nguyên sang Ngày ${state.day + 1}.</div>` : ''}
-      ${state.money < 0 ? `<div style="margin-top:0.75cqw;padding:0.7cqw;border-radius:0.9cqw;background:#FEF2F2;color:#B91C1C;font-weight:800;">⚠️ CẢNH BÁO NỢ (1/2 NGÀY): Hãy bán cổ phiếu, rút tiết kiệm hoặc chạy đơn gấp ngày mai!</div>` : ''}
+      ${state.money < 0 ? `<div style="margin-top:0.75cqw;padding:0.7cqw;border-radius:0.9cqw;background:#FEF2F2;color:#B91C1C;font-weight:800;line-height:1.4;">⚠️ CẢNH BÁO NỢ (${state.debtDays}/2 NGÀY CHỐT SỔ): Ngày âm quỹ được tính theo số dư <u>tại thời điểm chốt sổ cuối ngày</u> (dù trong ngày có lúc dương trở lại). Âm 2 kỳ chốt sổ liên tiếp sẽ phá sản — hãy bán cổ phiếu, rút tiết kiệm hoặc chạy đơn gấp ngày mai!</div>` : ''}
       <div style="display:flex;gap:0.75cqw;margin-top:1cqw;">
         <button id="btnStayNight" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:#F4ECE0;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">🛠️ Ở lại nâng cấp</button>
         <button id="btnGoNextDay" type="button" style="flex:1.4;padding:0.85cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">🌅 Sang Ngày ${state.day + 1} (08:00)</button>
@@ -1426,7 +1497,7 @@ window.STARUP_ENGINE = (() => {
     openModal('💥 Tuyên Bố Phá Sản — Kết Thúc', `
       <div style="text-align:center;padding:0.6cqw 0;">
         <div style="font-size:2.8cqw;">🏦</div>
-        <div style="font-size:1.48cqw;font-weight:900;color:#DC2626;margin-top:0.25cqw;">${state.companyName} đã phá sản (âm quỹ quá hạn)!</div>
+        <div style="font-size:1.48cqw;font-weight:900;color:#DC2626;margin-top:0.25cqw;">${state.companyName} đã phá sản (${state.money < -3000 ? 'nợ vượt quá -$3,000' : 'số dư lúc chốt sổ cuối ngày âm 2 ngày liên tiếp'})!</div>
         <p style="font-size:1.05cqw;color:#6B5443;margin:0.35cqw 0 0.85cqw 0;">Ngân hàng đã niêm phong văn phòng. Bạn có thể xem lại thành tích hành trình hoặc bắt đầu khởi nghiệp lại từ Ngày 1.</p>
         <div style="background:#FAF6F0;border-radius:1.1cqw;padding:0.95cqw;border:0.12cqw solid #DFD2C1;text-align:left;margin-bottom:1cqw;">
           <div>CEO: <strong>${state.ceoName}</strong> · Trụ vững: <strong>${state.day} ngày</strong></div>
@@ -1826,7 +1897,8 @@ window.STARUP_ENGINE = (() => {
     const debtBanner = document.getElementById('debtBanner');
     if (state.debtDays > 0 || state.money < 0) {
       debtBanner.classList.remove('hidden');
-      debtBanner.textContent = `⚠️ Âm quỹ (${state.debtDays}/2 ngày)`;
+      debtBanner.textContent = `⚠️ Âm quỹ (${state.debtDays}/2 ngày chốt sổ)`;
+      debtBanner.title = 'Số ngày âm quỹ được tính theo số dư tại thời điểm chốt sổ cuối ngày. Âm 2 kỳ chốt sổ liên tiếp sẽ phá sản.';
     } else debtBanner.classList.add('hidden');
 
     const btnP = document.getElementById('btnPrimary');
@@ -1994,6 +2066,11 @@ window.STARUP_ENGINE = (() => {
               rs.job.issue = (rc.id === 'tech' && Math.random() < 0.6) ? 'server' : 'coffee';
               AUD.playSFX('alert');
               overlayDirty = true;
+              if (rs.job.issue === 'server') {
+                showToast(`🔧 ${rc.name} tạm dừng ở 50% do lỗi Server! Bấm "🔧 Sửa Server!" cạnh phòng để tiếp tục.`);
+              } else {
+                showToast(`☕ ${rc.name} tạm dừng ở 50%! Bấm nút "☕ Pha Cà Phê!" cạnh phòng để gỡ kẹt và tiếp tục.`);
+              }
             }
           }
 

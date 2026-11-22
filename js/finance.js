@@ -150,18 +150,29 @@ window.STARUP_FINANCE = (() => {
             const okRooms = unlockedCount >= f.reqRooms;
             const okRoomId = !f.reqRoomId || (state.rooms[f.reqRoomId] && state.rooms[f.reqRoomId].unlocked);
             const canTake = !taken && okDay && okStars && okRooms && okRoomId;
-            let lockTxt = '';
-            if (!okDay) lockTxt = `Ngày ${f.reqDay}`;
-            else if (!okRoomId) lockTxt = f.reqRoomId === 'finance' ? 'Cần P.Tài Chính' : 'Cần P.Kỹ Thuật';
-            else if (!okRooms) lockTxt = `≥ ${f.reqRooms} phòng`;
-            else if (!okStars) lockTxt = `≥ ${f.reqStars} ★`;
+            const missingParts = [];
+            if (!okDay) missingParts.push(`Ngày ${f.reqDay}`);
+            if (!okRooms) missingParts.push(`≥ ${f.reqRooms} phòng`);
+            if (!okStars) missingParts.push(`≥ ${f.reqStars} ★`);
+            if (!okRoomId) missingParts.push(f.reqRoomId === 'finance' ? 'P.Tài Chính' : 'P.Kỹ Thuật');
+            const lockTxt = missingParts.join(' · ');
+            const reqBadges = [
+              `<span style="color:${okDay ? '#059669' : '#B45309'};font-weight:800;">${okDay ? '✓' : '•'} Ngày ${f.reqDay}</span>`,
+              `<span style="color:${okRooms ? '#059669' : '#B45309'};font-weight:800;">${okRooms ? '✓' : '•'} ${f.reqRooms} phòng</span>`,
+              `<span style="color:${okStars ? '#059669' : '#B45309'};font-weight:800;">${okStars ? '✓' : '•'} ${f.reqStars} ★</span>`
+            ];
+            if (f.reqRoomId) {
+              const rn = f.reqRoomId === 'finance' ? 'P.Tài Chính' : 'P.Kỹ Thuật';
+              reqBadges.push(`<span style="color:${okRoomId ? '#059669' : '#B45309'};font-weight:800;">${okRoomId ? '✓' : '•'} ${rn}</span>`);
+            }
             return `
               <div style="padding:0.85cqw 1cqw;border-radius:1.05cqw;border:0.12cqw solid ${taken ? '#86EFAC' : '#DFD2C1'};background:${taken ? '#ECFDF5' : '#FAF6F0'};display:flex;align-items:center;justify-content:space-between;gap:0.9cqw;">
                 <div>
                   <div style="font-weight:900;color:#3D2B1F;">${f.icon} ${f.name} — <span style="color:#059669;">+${fmtMoney(f.amount)}</span> <span style="color:#C2410C;font-size:1.02cqw;">(Chia ${f.equity}% lời)</span></div>
                   <div style="font-size:1.0cqw;color:#6B5443;">${f.desc}</div>
+                  ${taken ? '' : `<div style="font-size:0.94cqw;color:#7C6350;margin-top:0.25cqw;">Điều kiện mở: ${reqBadges.join(' &nbsp;·&nbsp; ')}</div>`}
                 </div>
-                <button data-take-fund="${f.id}" type="button" ${canTake ? '' : 'disabled'} style="padding:0.58cqw 1cqw;border-radius:0.85cqw;background:${taken ? '#059669' : (canTake ? '#D97706' : '#D6CCC0')};color:${(taken || canTake) ? '#fff' : '#6B5443'};font-weight:800;border:none;cursor:${canTake ? 'pointer' : 'not-allowed'};white-space:nowrap;">
+                <button data-take-fund="${f.id}" type="button" ${canTake ? '' : 'disabled'} style="padding:0.58cqw 0.9cqw;border-radius:0.85cqw;background:${taken ? '#059669' : (canTake ? '#D97706' : '#D6CCC0')};color:${(taken || canTake) ? '#fff' : '#6B5443'};font-weight:800;border:none;cursor:${canTake ? 'pointer' : 'not-allowed'};white-space:nowrap;font-size:0.98cqw;">
                   ${taken ? 'Đã nhận' : (canTake ? 'Nhận vốn' : `🔒 ${lockTxt}`)}
                 </button>
               </div>
