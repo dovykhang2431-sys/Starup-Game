@@ -1901,6 +1901,30 @@ window.STARUP_ENGINE = (() => {
       debtBanner.title = 'Số ngày âm quỹ được tính theo số dư tại thời điểm chốt sổ cuối ngày. Âm 2 kỳ chốt sổ liên tiếp sẽ phá sản.';
     } else debtBanner.classList.add('hidden');
 
+    const btnOT = document.getElementById('btnOvertime');
+    const otIcon = document.getElementById('overtimeIcon');
+    const otText = document.getElementById('overtimeText');
+    if (btnOT && otIcon && otText) {
+      if (state.dailyClosed || phase.key === 'night') {
+        btnOT.classList.add('hidden');
+      } else {
+        btnOT.classList.remove('hidden');
+        if (state.overtimeActive) {
+          btnOT.style.background = 'linear-gradient(180deg,#10B981,#047857)';
+          btnOT.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.4), 0 0.34cqw 0 #065F46';
+          btnOT.style.opacity = '0.92';
+          otIcon.textContent = '✅';
+          otText.textContent = 'Đã tăng ca (18:00)';
+        } else {
+          btnOT.style.background = 'linear-gradient(180deg,#F43F5E,#BE123C)';
+          btnOT.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.45), 0 0.42cqw 0 #881337';
+          btnOT.style.opacity = '1';
+          otIcon.textContent = '🧋';
+          otText.textContent = 'Tăng ca +1h';
+        }
+      }
+    }
+
     const btnP = document.getElementById('btnPrimary');
     const pIcon = document.getElementById('primaryIcon');
     const pText = document.getElementById('primaryText');
@@ -1908,10 +1932,6 @@ window.STARUP_ENGINE = (() => {
       btnP.style.background = 'linear-gradient(180deg,#10B981,#047857)';
       btnP.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.45), 0 0.42cqw 0 #065F46';
       pIcon.textContent = '🌅'; pText.textContent = `Sang Ngày ${state.day + 1}`;
-    } else if (phase.key === 'sunset' && !state.overtimeActive) {
-      btnP.style.background = 'linear-gradient(180deg,#F43F5E,#BE123C)';
-      btnP.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.45), 0 0.42cqw 0 #881337';
-      pIcon.textContent = '🧋'; pText.textContent = 'Tăng ca +1h';
     } else if (state.happyHourLeft > 0) {
       btnP.style.background = 'linear-gradient(180deg,#FBBF24,#D97706)';
       btnP.style.boxShadow = 'inset 0 0.2cqw 0 rgba(255,255,255,0.45), 0 0.42cqw 0 #92400E';
@@ -2297,15 +2317,31 @@ window.STARUP_ENGINE = (() => {
     document.getElementById('btnIPO').onclick = openIPOModal;
     document.getElementById('btnSettings').onclick = openSettingsModal;
     document.getElementById('btnTrophy').onclick = () => openTrophyModal('quests');
+    const btnOvertimeEl = document.getElementById('btnOvertime');
+    if (btnOvertimeEl) {
+      btnOvertimeEl.onclick = () => {
+        if (!state) return;
+        const phase = getPhase(state.minutes);
+        if (state.dailyClosed || phase.key === 'night') return;
+        if (state.overtimeActive) {
+          return showToast('✅ Đã kích hoạt tăng ca hôm nay — giờ làm việc kéo dài đến 18:00!');
+        }
+        if (state.money < 200) return showToast('Cần $200 tiền mặt để mời trà sữa tăng ca!');
+        state.overtimeActive = true;
+        state.money -= 200;
+        state.morale = Math.max(30, state.morale - 12);
+        AUD.playSFX('click');
+        showToast('🧋 Đã mời trà sữa (-$200)! Tăng ca đến 18:00 (-12% Tinh thần).');
+        autoSave();
+        renderHUD();
+      };
+    }
+
     document.getElementById('btnPrimary').onclick = () => {
       if (!state) return;
       const phase = getPhase(state.minutes);
       if (phase.key === 'night') startNextDay();
-      else if (phase.key === 'sunset' && !state.overtimeActive) {
-        if (state.money < 200) return showToast('Cần $200 tiền mặt để mời trà sữa tăng ca!');
-        state.overtimeActive = true; state.money -= 200; state.morale = Math.max(30, state.morale - 12); AUD.playSFX('click');
-        showToast('🧋 Đã mời trà sữa (-$200)! Tăng ca đến 18:00 (-12% Tinh thần).');
-      } else if (state.happyHourLeft > 0) {
+      else if (state.happyHourLeft > 0) {
         showToast(`⚡ Giờ Trà Chiều đang chạy (còn ${Math.ceil(state.happyHourLeft)}s)!`);
       } else if (state.happyHourCooldown > 0) {
         showToast(`⏳ Trà Chiều đang hồi chiêu (còn ${Math.ceil(state.happyHourCooldown)}s)!`);
