@@ -487,7 +487,7 @@ window.STARUP_ENGINE = (() => {
     if (dup) return;
     state.newsHint = text;
     state.newsList.unshift({ day: state.day, text });
-    if (state.newsList.length > 12) state.newsList.pop();
+    if (state.newsList.length > 8) state.newsList.pop();
     state.unreadNews = true;
   }
 
@@ -1112,8 +1112,11 @@ window.STARUP_ENGINE = (() => {
           stuckPill.style.left = rc.chipPos.x + '%';
           stuckPill.style.top = (rc.chipPos.y + 5.5) + '%';
           const stuckPct = Math.min(100, Math.floor(j.progress || 0));
+          stuckPill.title = isServer
+            ? 'Phòng chưa có Quản Lý Tự Động — bấm nút "🔧 Sửa Server!" để gỡ kẹt'
+            : 'Phòng chưa có Quản Lý Tự Động — bấm nút "☕ Pha Cà Phê!" để gỡ kẹt';
           stuckPill.innerHTML = `
-            <div id="prog-txt-${rc.id}" style="font-size:0.88cqw;font-weight:900;color:#B91C1C;text-align:center;">${isServer ? '🔧' : '☕'} Kẹt! ${stuckPct}%</div>
+            <div id="prog-txt-${rc.id}" style="font-size:0.86cqw;font-weight:900;color:#B91C1C;text-align:center;">${isServer ? '🔧' : '☕'} Kẹt ${stuckPct}% · Bấm nút!</div>
             <div class="work-progress-bar" style="background:#FECACA;"><div id="prog-bar-${rc.id}" class="work-progress-fill" style="width:${stuckPct}%;background:#DC2626;"></div></div>
           `;
           layer.appendChild(stuckPill);
@@ -2244,7 +2247,13 @@ window.STARUP_ENGINE = (() => {
         CFG.ROOMS.forEach(rc => {
           const rs = state.rooms[rc.id];
           if (!rs.unlocked || !rs.hasManager || !rs.job) return;
-          if (rs.job.issue) { rs.job.issue = null; overlayDirty = true; }
+          if (rs.job.issue) {
+            const fixedKind = rs.job.issue;
+            rs.job.issue = null;
+            overlayDirty = true;
+            showToast(`🎖️ Quản lý ${rc.name} đã tự động ${fixedKind === 'server' ? 'sửa Server' : 'pha cà phê'} gỡ kẹt!`);
+            autoSave();
+          }
           if (rs.job.ready) { deliverRoomJob(rc.id); overlayDirty = true; }
         });
 
