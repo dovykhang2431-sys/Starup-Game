@@ -158,7 +158,7 @@ window.STARUP_FINANCE = (() => {
             const lockTxt = missingParts.join(' · ');
             const reqBadges = [
               `<span style="color:${okDay ? '#059669' : '#B45309'};font-weight:800;">${okDay ? '✓' : '•'} Ngày ${f.reqDay}</span>`,
-              `<span style="color:${okRooms ? '#059669' : '#B45309'};font-weight:800;">${okRooms ? '✓' : '•'} ${unlockedCount}/${f.reqRooms} phòng</span>`,
+              `<span style="color:${okRooms ? '#059669' : '#B45309'};font-weight:800;">${okRooms ? '✓' : '•'} ${Math.min(unlockedCount, f.reqRooms)}/${f.reqRooms} phòng</span>`,
               `<span style="color:${okStars ? '#059669' : '#B45309'};font-weight:800;">${okStars ? '✓' : '•'} ${f.reqStars} ★</span>`
             ];
             if (f.reqRoomId) {

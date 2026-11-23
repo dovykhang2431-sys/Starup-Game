@@ -73,6 +73,9 @@ window.STARUP_ENGINE = (() => {
       lastPowerOutageDay: -10,
       lastStaffSickDay: -10,
       lastMacroWaveDay: -10,
+      lastTaxAuditDay: -10,
+      lastIndustryBoomDay: -10,
+      lastPartnerPromoDay: -10,
       lastSickRoomId: '',
       lastEventKind: '',
       isBankrupt: false,
@@ -122,7 +125,12 @@ window.STARUP_ENGINE = (() => {
         st.investorEquity || 0, st.overtimeActive ? 1 : 0, Math.round(st.happyHourLeft || 0),
         Math.round(st.happyHourCooldown || 0), st.dailyClosed ? 1 : 0, st.lastPowerOutageDay || -10,
         st.lastEventKind || '', st.lastStaffSickDay !== undefined ? st.lastStaffSickDay : -10,
-        st.lastMacroWaveDay !== undefined ? st.lastMacroWaveDay : -10, st.lastSickRoomId || ''
+        st.lastMacroWaveDay !== undefined ? st.lastMacroWaveDay : -10, st.lastSickRoomId || '',
+        st.eventTriggeredToday ? 1 : 0, st.sickStaffRoomId || '', st.disabledRoomId || '',
+        st.clientRateDebuff !== undefined ? st.clientRateDebuff : 1, st.activeEventTag || '',
+        st.lastTaxAuditDay !== undefined ? st.lastTaxAuditDay : -10,
+        st.lastIndustryBoomDay !== undefined ? st.lastIndustryBoomDay : -10,
+        st.lastPartnerPromoDay !== undefined ? st.lastPartnerPromoDay : -10
       ],
       r: rm,
       l: st.loan ? [st.loan.name, st.loan.dailyPay, st.loan.daysLeft] : 0,
@@ -165,6 +173,14 @@ window.STARUP_ENGINE = (() => {
     baseSt.lastStaffSickDay = g[24] !== undefined ? g[24] : -10;
     baseSt.lastMacroWaveDay = g[25] !== undefined ? g[25] : -10;
     baseSt.lastSickRoomId = typeof g[26] === 'string' ? g[26] : '';
+    baseSt.eventTriggeredToday = !!g[27];
+    baseSt.sickStaffRoomId = (typeof g[28] === 'string' && g[28]) ? g[28] : null;
+    baseSt.disabledRoomId = (typeof g[29] === 'string' && g[29]) ? g[29] : null;
+    baseSt.clientRateDebuff = typeof g[30] === 'number' ? g[30] : 1;
+    baseSt.activeEventTag = typeof g[31] === 'string' ? g[31] : '';
+    baseSt.lastTaxAuditDay = g[32] !== undefined ? g[32] : -10;
+    baseSt.lastIndustryBoomDay = g[33] !== undefined ? g[33] : -10;
+    baseSt.lastPartnerPromoDay = g[34] !== undefined ? g[34] : -10;
 
     if (d.r) {
       CFG.ROOMS.forEach(rc => {
@@ -334,15 +350,16 @@ window.STARUP_ENGINE = (() => {
           nextAgents.push(existingById[id]);
         } else {
           const roleKey = rc.id === 'ceo' ? state.ceoAvatar : (rc.id === 'finance' ? 'ceo' : rc.id);
-          // FIX: If hired after closing (17:00+), stay outside until 08:00 tomorrow!
-          const startNode = (startOutside || isClosed) ? 'outside' : deskNode;
+          // FIX: If hired after closing (17:00+) or sick today after reload, stay outside!
+          const isSickReload = (i === 0 && state.sickStaffRoomId === rc.id);
+          const startNode = (startOutside || isClosed || isSickReload) ? 'outside' : deskNode;
           const pos = CFG.NODES[startNode];
           const a = {
             id, role: 'staff', roomId: rc.id, home: deskNode,
             roleKey, node: startNode, x: pos.x, y: pos.y,
-            path: [], wait: 1.5 + Math.random() * 2, badge: rc.icon, speed: 12.5, sickToday: false
+            path: [], wait: 1.5 + Math.random() * 2, badge: isSickReload ? '🤒' : rc.icon, speed: 12.5, sickToday: isSickReload
           };
-          if (!isClosed && startOutside) {
+          if (!isClosed && !isSickReload && startOutside) {
             if (isLunch) {
               const lSpot = state.rooms.pantry.unlocked ? 'pantryBar' : 'sofa';
               sendAgent(a, lSpot, '🍚');
@@ -737,6 +754,7 @@ window.STARUP_ENGINE = (() => {
   }
 
   function openReportModal(tab = activeReportTab) {
+    updateOverlayLiveMetrics();
     activeReportTab = tab;
     const pendingList = waitingClients.filter(c => c.arrived);
     const activeJobs = CFG.ROOMS.filter(rc => state.rooms[rc.id].unlocked && state.rooms[rc.id].job).map(rc => ({ rc, job: state.rooms[rc.id].job }));
@@ -1202,14 +1220,23 @@ window.STARUP_ENGINE = (() => {
     const workRooms = CFG.ROOMS.filter(r => r.baseReward > 0 && state.rooms[r.id].unlocked);
     const targetRoom = workRooms[Math.floor(Math.random() * workRooms.length)] || CFG.ROOMS[1];
 
-    const pool = ['tax_audit', 'industry_boom', 'partner_promo'];
+    const pool = [];
     if ((state.day - (state.lastPowerOutageDay !== undefined ? state.lastPowerOutageDay : -10)) >= 6) pool.push('power_outage');
     if ((state.day - (state.lastStaffSickDay !== undefined ? state.lastStaffSickDay : -10)) >= 6) pool.push('staff_sick');
     if ((state.day - (state.lastMacroWaveDay !== undefined ? state.lastMacroWaveDay : -10)) >= 4) pool.push('macro_wave');
-    const nonDupPool = pool.filter(k => k !== state.lastEventKind);
-    const activePool = nonDupPool.length ? nonDupPool : pool;
+    if ((state.day - (state.lastTaxAuditDay !== undefined ? state.lastTaxAuditDay : -10)) >= 3) pool.push('tax_audit');
+    if ((state.day - (state.lastIndustryBoomDay !== undefined ? state.lastIndustryBoomDay : -10)) >= 3) pool.push('industry_boom');
+    if ((state.day - (state.lastPartnerPromoDay !== undefined ? state.lastPartnerPromoDay : -10)) >= 3) pool.push('partner_promo');
+    const fallbackPool = ['tax_audit', 'industry_boom', 'partner_promo'];
+    const basePool = pool.length ? pool : fallbackPool;
+    const nonDupPool = basePool.filter(k => k !== state.lastEventKind);
+    const activePool = nonDupPool.length ? nonDupPool : basePool;
     const kind = activePool[Math.floor(Math.random() * activePool.length)];
     state.lastEventKind = kind;
+    if (kind === 'tax_audit') state.lastTaxAuditDay = state.day;
+    else if (kind === 'industry_boom') state.lastIndustryBoomDay = state.day;
+    else if (kind === 'partner_promo') state.lastPartnerPromoDay = state.day;
+    autoSave();
     AUD.playSFX('alert');
 
     if (kind === 'power_outage') {
@@ -2159,7 +2186,7 @@ window.STARUP_ENGINE = (() => {
           spawnStaffBanter(phase.key === 'morning' || phase.key === 'afternoon' || phase.key === 'sunset' ? 'work' : phase.key);
         }
         hudAccum += rawDt;
-        if (hudAccum >= 0.3) { hudAccum = 0; renderHUD(); renderMapOverlays(); }
+        if (hudAccum >= 0.15) { hudAccum = 0; renderHUD(); renderMapOverlays(); }
         else if (overlayDirty) renderMapOverlays();
       }
     }
