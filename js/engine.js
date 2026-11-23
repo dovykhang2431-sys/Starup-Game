@@ -316,7 +316,11 @@ window.STARUP_ENGINE = (() => {
     if (Array.isArray(d.pe) && d.pe[0]) {
       baseSt.pendingEvent = { kind: d.pe[0], roomId: d.pe[1] || '' };
     }
-    if (d.sd && typeof d.sd === 'object') baseSt.roomSickLastDay = d.sd;
+    if (d.sd && typeof d.sd === 'object' && Object.keys(d.sd).length) {
+      baseSt.roomSickLastDay = d.sd;
+    } else if (baseSt.lastSickRoomId && baseSt.lastStaffSickDay > 0) {
+      baseSt.roomSickLastDay = { [baseSt.lastSickRoomId]: baseSt.lastStaffSickDay };
+    }
     if (d.rs && typeof d.rs === 'object') baseSt.roomStats = d.rs;
     return baseSt;
   }
