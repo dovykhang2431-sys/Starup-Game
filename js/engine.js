@@ -305,11 +305,14 @@ window.STARUP_ENGINE = (() => {
     }
     const isV2 = raw.startsWith('STARUP2-');
     const b64 = raw.replace(/^STARUP2?-/, '').replace(/\s+/g, '');
+    if (/[^A-Za-z0-9+/=]/.test(b64)) {
+      return { data: null, error: `Mã không hợp lệ do sai ký tự bên trong (chứa ký tự ngoài bảng mã, hiện có ${raw.length} ký tự). Hãy kiểm tra lại từng ký tự hoặc sao chép lại toàn bộ mã.` };
+    }
     let jsonStr = '';
     try {
       jsonStr = decodeURIComponent(escape(atob(b64)));
     } catch (e) {
-      return { data: null, error: `Mã không hợp lệ — sai ký tự hoặc bị thiếu phần cuối (hiện có ${raw.length} ký tự). Hãy kiểm tra lại từng ký tự hoặc sao chép lại mã.` };
+      return { data: null, error: `Mã bị cắt giữa chừng hoặc sai ký tự ở phần cuối (hiện có ${raw.length} ký tự). Hãy sao chép lại toàn bộ mã.` };
     }
     let parsed = null;
     try {
@@ -1979,15 +1982,20 @@ window.STARUP_ENGINE = (() => {
       if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
       const res = decodeSaveCodeWithReason(document.getElementById('saveCodeIn').value);
       if (!res.data) return showToast('❌ ' + res.error);
-      const decoded = res.data;
-      decoded.speed = 0; // S14-2, S16-1 & S17-2: Immediately apply paused state, update HUD & close Settings modal on first tap
-      state = decoded; waitingClients = []; agents = [];
-      lastPhase = getPhase(state.minutes).key;
-      document.getElementById('btnSpeed').textContent = '⏸';
-      applyBranchMap(); rebuildStaffAgents(false); restoreSavedWaitingClients();
-      renderHUD(); renderMapOverlays(true); renderTutorial();
-      autoSave(); closeModal();
-      showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day} (tạm dừng)!`);
+      try {
+        const decoded = res.data;
+        decoded.speed = 0; // S14-2, S16-1, S17-2 & S18-1: Immediately apply paused state, update HUD & close Settings modal
+        state = decoded; waitingClients = []; agents = [];
+        lastPhase = getPhase(state.minutes).key;
+        document.getElementById('btnSpeed').textContent = '⏸';
+        applyBranchMap(); rebuildStaffAgents(false); restoreSavedWaitingClients();
+        renderHUD(); renderMapOverlays(true); renderTutorial();
+        autoSave(); closeModal();
+        showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day} (tạm dừng)!`);
+      } catch (err) {
+        console.error('Settings restore error:', err);
+        showToast('❌ Lỗi khi khôi phục dữ liệu: ' + (err && err.message ? err.message : 'không xác định'));
+      }
     };
     btnRestoreSettingsEl.addEventListener('pointerdown', handleSettingsRestore);
     btnRestoreSettingsEl.onclick = handleSettingsRestore;
@@ -2425,12 +2433,17 @@ window.STARUP_ENGINE = (() => {
         if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
         const res = decodeSaveCodeWithReason(document.getElementById('introCodeInp').value);
         if (!res.data) return showToast('❌ ' + res.error);
-        const decoded = res.data;
-        decoded.speed = 0; // S14-2 & S17-2: Apply real state & HUD before closing modal so Day 1 placeholder never flashes
-        state = decoded;
-        beginGameplay(false);
-        closeModal();
-        showToast('⏸️ Đã khôi phục tiến độ ở trạng thái tạm dừng — bấm nút ⏸ để tiếp tục!');
+        try {
+          const decoded = res.data;
+          decoded.speed = 0; // S14-2, S17-2 & S18-1: Apply real state & HUD before closing modal
+          state = decoded;
+          beginGameplay(false);
+          closeModal();
+          showToast('⏸️ Đã khôi phục tiến độ ở trạng thái tạm dừng — bấm nút ⏸ để tiếp tục!');
+        } catch (err) {
+          console.error('Intro restore error:', err);
+          showToast('❌ Lỗi khi khôi phục dữ liệu: ' + (err && err.message ? err.message : 'không xác định'));
+        }
       };
       btnConfirmIntroEl.addEventListener('pointerdown', handleIntroRestore);
       btnConfirmIntroEl.onclick = handleIntroRestore;
@@ -2465,7 +2478,7 @@ window.STARUP_ENGINE = (() => {
       });
     });
     state.savedWaitingClients = [];
-    renderAgents();
+    renderAgentsDOM();
   }
 
   function beginGameplay(isNew) {
