@@ -141,17 +141,23 @@ window.STARUP_EMPIRE = (() => {
             const isCur = (state.activeMapIdx !== undefined ? state.activeMapIdx : state.branchIdx) === idx;
             const unlocked = idx <= maxUnlocked;
             const canExp = state.ipoDone && idx === state.branchIdx + 1 && nw >= b.reqVal;
+            const branchLockLabel = !state.ipoDone
+              ? `🔒 Cần IPO & ${FIN.fmtMoney(b.reqVal)}`
+              : (idx > state.branchIdx + 1
+                  ? `🔒 Mở chi nhánh trước (${FIN.fmtMoney(b.reqVal)})`
+                  : `🔒 Cần tài sản ròng ${FIN.fmtMoney(b.reqVal)}`);
             return `
               <div style="padding:0.8cqw 1cqw;border-radius:1cqw;border:0.12cqw solid ${isCur ? '#10B981' : '#DFD2C1'};background:${isCur ? '#F0FDF4' : '#FAF6F0'};display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
                 <div>
                   <div style="font-weight:800;color:#3D2B1F;">${b.name}</div>
                   <div style="font-size:1.0cqw;color:#6B5443;">${b.desc}</div>
+                  ${!unlocked && b.reqVal > 0 ? `<div style="font-size:0.94cqw;color:${nw >= b.reqVal ? '#059669' : '#B45309'};font-weight:800;margin-top:0.2cqw;">Tài sản ròng: ${FIN.fmtMoney(nw)} / ${FIN.fmtMoney(b.reqVal)}${!state.ipoDone ? ' · Cần IPO' : ''}</div>` : ''}
                 </div>
                 ${unlocked
                   ? (isCur
                       ? `<span style="padding:0.35cqw 0.78cqw;border-radius:999px;background:#059669;color:#fff;font-weight:800;font-size:0.98cqw;white-space:nowrap;">Đang dùng mặt bằng</span>`
                       : `<button data-switch-map="${idx}" type="button" style="padding:0.45cqw 0.85cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">🏢 Chuyển mặt bằng</button>`)
-                  : `<button data-expand-branch="${idx}" type="button" ${canExp ? '' : 'disabled'} style="padding:0.52cqw 0.88cqw;border-radius:0.85cqw;background:${canExp ? '#D97706' : '#D6CCC0'};color:#fff;font-weight:800;border:none;cursor:${canExp ? 'pointer' : 'not-allowed'};white-space:nowrap;">Mở rộng</button>`
+                  : `<button data-expand-branch="${idx}" type="button" ${canExp ? '' : 'disabled'} style="padding:0.52cqw 0.88cqw;border-radius:0.85cqw;background:${canExp ? '#D97706' : '#D6CCC0'};color:${canExp ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:${canExp ? 'pointer' : 'not-allowed'};white-space:nowrap;font-size:0.96cqw;">${canExp ? '🚀 Mở rộng' : branchLockLabel}</button>`
                 }
               </div>
             `;

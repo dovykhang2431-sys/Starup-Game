@@ -119,7 +119,7 @@ window.STARUP_ENGINE = (() => {
       v: 2,
       c: [st.ceoName, st.companyName, st.ceoAvatar],
       g: [
-        st.day, Math.round(st.minutes), st.speed || 1, Math.round(st.money), st.stars,
+        st.day, Math.round(st.minutes), (st.speed !== undefined ? st.speed : 1), Math.round(st.money), st.stars,
         st.morale, st.brandAwareness || 0, Math.round(st.peakNetWorth || st.money),
         st.contractsDone || 0, st.debtDays || 0, st.tutorialStep || 0, Math.round(st.dayRevenue || 0),
         st.ipoDone ? 1 : 0, st.ticker || '', st.branchIdx || 0, st.maxBranchIdx || 0, st.activeMapIdx || 0,
@@ -1576,7 +1576,7 @@ window.STARUP_ENGINE = (() => {
 
     openModal(`📊 Chốt Sổ Ngày ${state.day} — ${state.companyName}`, `
       <div style="background:#FAF6F0;border:0.12cqw solid #DFD2C1;border-radius:1.1cqw;padding:1cqw;display:flex;flex-direction:column;gap:0.5cqw;">
-        <div style="display:flex;justify-content:space-between;"><span>Doanh thu chốt đơn hôm nay</span><strong style="color:#059669;">+${FIN.fmtMoney(state.dayRevenue)}</strong></div>
+        <div style="display:flex;justify-content:space-between;"><span>Doanh thu chốt đơn hôm nay <em style="color:#7C6350;font-size:0.92em;">(đã cộng vào quỹ trong ngày)</em></span><strong style="color:#059669;">+${FIN.fmtMoney(state.dayRevenue)}</strong></div>
         ${dividend > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Cổ tức Chi nhánh toàn cầu</span><strong style="color:#059669;">+${FIN.fmtMoney(dividend)}</strong></div>` : ''}
         ${prodIncome > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🚀 Doanh thu Sản Phẩm riêng</span><strong style="color:#059669;">+${FIN.fmtMoney(prodIncome)}</strong></div>` : ''}
         ${rivalDiv > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🏢 Cổ tức Thâu tóm M&A</span><strong style="color:#059669;">+${FIN.fmtMoney(rivalDiv)}</strong></div>` : ''}
@@ -1585,6 +1585,10 @@ window.STARUP_ENGINE = (() => {
         ${loanPayment > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Trả góp Ngân hàng</span><strong style="color:#DC2626;">-${FIN.fmtMoney(loanPayment)}</strong></div>` : ''}
         ${rushPenalty > 0 ? `<div style="display:flex;justify-content:space-between;"><span>⚡ Phạt trễ hạn đơn Hỏa Tốc (−${rushStarsLost} ★ · chuyển làm tiếp ngày mai)</span><strong style="color:#DC2626;">-${FIN.fmtMoney(rushPenalty)}</strong></div>` : ''}
         ${investorShare > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🤝 Chia lãi Nhà đầu tư (${state.investorEquity}%)</span><strong style="color:#C2410C;">-${FIN.fmtMoney(investorShare)}</strong></div>` : ''}
+        <div style="display:flex;justify-content:space-between;font-size:1.02cqw;color:#6B5443;padding-top:0.35cqw;border-top:0.1cqw dashed #DFD2C1;">
+          <span>Chênh lệch chốt sổ cuối ngày (thu thụ động − chi phí)</span>
+          <strong style="color:${(passiveTotal - finalOpCost - loanPayment - rushPenalty - investorShare) >= 0 ? '#059669' : '#DC2626'};">${(passiveTotal - finalOpCost - loanPayment - rushPenalty - investorShare) >= 0 ? '+' : ''}${FIN.fmtMoney(passiveTotal - finalOpCost - loanPayment - rushPenalty - investorShare)}</strong>
+        </div>
         <div style="display:flex;justify-content:space-between;padding-top:0.55cqw;border-top:0.12cqw solid #D8C7B2;font-weight:900;font-size:1.35cqw;">
           <span>Số dư tiền mặt hiện tại</span>
           <span style="color:${state.money >= 0 ? '#059669' : '#DC2626'};">${FIN.fmtMoney(state.money)}</span>
@@ -2147,6 +2151,8 @@ window.STARUP_ENGINE = (() => {
             c.patience -= dt;
             if (c.patience <= 0) expired.push(c);
           });
+          let penalizedExpiredCount = 0;
+          let lastPenalizedWho = '';
           expired.forEach(c => {
             const targetBusy = !!(state.rooms[c.roomId] && state.rooms[c.roomId].job) || state.disabledRoomId === c.roomId;
             if (targetBusy) {
@@ -2156,12 +2162,19 @@ window.STARUP_ENGINE = (() => {
               state.morale = Math.max(20, state.morale - 4);
               AUD.playSFX('alert');
               const who = c.isVIP ? 'Khách VIP' : 'Khách hàng';
-              showToast(`😤 ${who} đã rời đi: −2 ★`);
+              penalizedExpiredCount += 1;
+              lastPenalizedWho = `${who} (${c.roomName})`;
+              addNews(`😤 ${who} (${c.roomName} · ${FIN.fmtMoney(c.reward)}) rời sảnh do hết giờ chờ: −2 ★`);
             }
             dismissClient(c.id, false);
             autoSave();
             renderHUD();
           });
+          if (penalizedExpiredCount === 1) {
+            showToast(`😤 ${lastPenalizedWho} đã rời đi: −2 ★`);
+          } else if (penalizedExpiredCount > 1) {
+            showToast(`😤 ${penalizedExpiredCount} khách hàng rời sảnh vì hết giờ chờ: −${penalizedExpiredCount * 2} ★`);
+          }
         }
 
         let overlayDirty = false;
@@ -2360,7 +2373,11 @@ window.STARUP_ENGINE = (() => {
         const res = decodeSaveCodeWithReason(document.getElementById('introCodeInp').value);
         if (!res.data) return showToast('❌ ' + res.error);
         const decoded = res.data;
-        state = decoded; closeModal(); beginGameplay(false);
+        decoded.speed = 0; // S14-2: Start paused after code restore so time never drifts before player inspects
+        decoded.speed = 0; // S14-2: Start paused after code restore
+      state = decoded; closeModal(); beginGameplay(false);
+      showToast('⏸️ Đã khôi phục tiến độ ở trạng thái tạm dừng — bấm nút ⏸ để tiếp tục!');
+        showToast('⏸️ Đã khôi phục tiến độ ở trạng thái tạm dừng — bấm nút ⏸ để tiếp tục!');
       };
     };
   }
@@ -2404,7 +2421,16 @@ window.STARUP_ENGINE = (() => {
       document.body.classList.add('bypass-portrait');
     };
     document.getElementById('btnBypassPortrait').onclick = () => document.body.classList.add('bypass-portrait');
-    document.getElementById('btnCloseModal').onclick = closeModal;
+    const btnCloseModalEl = document.getElementById('btnCloseModal');
+    const handleCloseModalPress = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        document.activeElement.blur();
+      }
+      closeModal();
+    };
+    btnCloseModalEl.addEventListener('pointerdown', handleCloseModalPress);
+    btnCloseModalEl.onclick = handleCloseModalPress;
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         const mo = document.getElementById('modalOverlay');
