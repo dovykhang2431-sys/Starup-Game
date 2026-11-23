@@ -161,6 +161,22 @@ window.STARUP_ENGINE = (() => {
       })(),
       dn: (st.dailyCompletedJobs && st.dailyCompletedJobs.length)
         ? st.dailyCompletedJobs.slice(0, 8).map(x => [x.title, x.roomName, x.roomIcon, Math.round(x.reward || 0), x.stars || 2, x.time || ''])
+        : 0,
+      wc: (() => {
+        const src = (st === state && waitingClients && waitingClients.length)
+          ? waitingClients
+          : (Array.isArray(st.savedWaitingClients) ? st.savedWaitingClients : []);
+        const list = src.filter(c => c && (c.patience || 0) > 0).slice(0, 3).map(c => [
+          c.slotIdx || 0, c.roomId, c.title, Math.round(c.reward || 0),
+          Math.round((c.duration || 10) * 10) / 10,
+          c.tier === 'rush' ? 1 : (c.tier === 'mega' ? 2 : 0),
+          c.isVIP ? 1 : 0, c.stars || 2, Math.round(c.penalty || 0),
+          Math.max(3, Math.round(c.patience || 25))
+        ]);
+        return list.length ? list : 0;
+      })(),
+      nw: (st.newsList && st.newsList.length)
+        ? st.newsList.slice(0, 6).map(x => [x.day || st.day || 1, x.text || ''])
         : 0
     };
   }
@@ -258,8 +274,19 @@ window.STARUP_ENGINE = (() => {
         reward: x[3] || 0, stars: x[4] || 2, time: x[5] || ''
       }));
     }
-    baseSt.newsList = [{ day: baseSt.day, text: `Chào mừng CEO ${baseSt.ceoName} trở lại điều hành ${baseSt.companyName} (Ngày ${baseSt.day})!` }];
-    baseSt.newsHint = baseSt.newsList[0].text;
+    if (Array.isArray(d.nw) && d.nw.length) {
+      baseSt.newsList = d.nw.map(x => ({ day: x[0] || baseSt.day, text: x[1] || '' })).filter(x => x.text);
+    } else {
+      baseSt.newsList = [{ day: baseSt.day, text: `Chào mừng CEO ${baseSt.ceoName} trở lại điều hành ${baseSt.companyName} (Ngày ${baseSt.day})!` }];
+    }
+    baseSt.newsHint = (baseSt.newsList[0] && baseSt.newsList[0].text) || '';
+    if (Array.isArray(d.wc) && d.wc.length) {
+      baseSt.savedWaitingClients = d.wc.map(x => ({
+        slotIdx: x[0] || 0, roomId: x[1], title: x[2] || 'Hợp đồng', reward: x[3] || 0,
+        duration: x[4] || 10, tier: x[5] === 1 ? 'rush' : (x[5] === 2 ? 'mega' : 'normal'),
+        isVIP: !!x[6], stars: x[7] || 2, penalty: x[8] || 0, patience: Math.max(3, x[9] || 20)
+      }));
+    }
     return baseSt;
   }
 
@@ -453,7 +480,7 @@ window.STARUP_ENGINE = (() => {
     if (dup) return;
     state.newsHint = text;
     state.newsList.unshift({ day: state.day, text });
-    if (state.newsList.length > 8) state.newsList.pop();
+    if (state.newsList.length > 12) state.newsList.pop();
     state.unreadNews = true;
   }
 
@@ -697,6 +724,7 @@ window.STARUP_ENGINE = (() => {
       patience: workCount <= 1 ? 40 : (workCount <= 3 ? 38 : 35), arrived: false
     };
     waitingClients.push(clientObj);
+    autoSave();
 
     const cAgent = {
       id: cid, role: 'client', roleKey: isVIP ? 'vip' : 'client',
@@ -2164,7 +2192,7 @@ window.STARUP_ENGINE = (() => {
               const who = c.isVIP ? 'Khách VIP' : 'Khách hàng';
               penalizedExpiredCount += 1;
               lastPenalizedWho = `${who} (${c.roomName})`;
-              addNews(`😤 ${who} (${c.roomName} · ${FIN.fmtMoney(c.reward)}) rời sảnh do hết giờ chờ: −2 ★`);
+              addNews(`[${fmtTime(state.minutes)}] 😤 ${who} (${c.roomName} · ${FIN.fmtMoney(c.reward)}) rời sảnh do hết giờ chờ: −2 ★`);
             }
             dismissClient(c.id, false);
             autoSave();
@@ -2393,7 +2421,32 @@ window.STARUP_ENGINE = (() => {
     lastPhase = getPhase(state.minutes).key;
     applyBranchMap();
     rebuildStaffAgents(isNew);
-    autoSave(); renderHUD(); renderMapOverlays(); renderTutorial();
+    if (!isNew && Array.isArray(state.savedWaitingClients) && state.savedWaitingClients.length && lastPhase !== 'night') {
+      state.savedWaitingClients.forEach((sc, idx) => {
+        const rc = CFG.ROOMS.find(r => r.id === sc.roomId);
+        if (!rc || !state.rooms[rc.id] || !state.rooms[rc.id].unlocked) return;
+        const slotIdx = Math.min(CLIENT_SLOTS.length - 1, Math.max(0, sc.slotIdx !== undefined ? sc.slotIdx : idx));
+        const slot = CLIENT_SLOTS[slotIdx];
+        const cid = 'cli_res_' + Date.now() + '_' + idx;
+        const clientObj = {
+          id: cid, slotIdx, slotX: slot.x, slotY: slot.y,
+          roomId: rc.id, roomName: rc.name, roomIcon: rc.icon,
+          title: sc.title, reward: sc.reward, duration: sc.duration,
+          tier: sc.tier, isVIP: !!sc.isVIP, stars: sc.stars || 2,
+          penalty: sc.penalty || 0, patience: Math.max(3, sc.patience || 20), arrived: true
+        };
+        waitingClients.push(clientObj);
+        agents.push({
+          id: cid, role: 'client', roleKey: clientObj.isVIP ? 'vip' : 'client',
+          node: slot.node, x: slot.x, y: slot.y,
+          path: [], wait: 999, badge: clientObj.tier === 'mega' ? '🌟' : (clientObj.tier === 'rush' ? '⚡' : (clientObj.isVIP ? '💎' : '💼')),
+          speed: 15, targetSlot: slotIdx
+        });
+      });
+      state.savedWaitingClients = [];
+      renderAgents();
+    }
+    autoSave(); renderHUD(); renderMapOverlays(true); renderTutorial();
     if (isNew) {
       clientSpawnCooldown = 2.5;
       showToast(`🎉 Chào mừng CEO ${state.ceoName} đến với ${state.companyName}!`);
