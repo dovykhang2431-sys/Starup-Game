@@ -176,7 +176,7 @@ window.STARUP_ENGINE = (() => {
         return list.length ? list : 0;
       })(),
       nw: (st.newsList && st.newsList.length)
-        ? st.newsList.slice(0, 6).map(x => [x.day || st.day || 1, x.text || ''])
+        ? st.newsList.slice(0, 8).map(x => [x.day || st.day || 1, x.text || ''])
         : 0
     };
   }
@@ -1969,9 +1969,13 @@ window.STARUP_ENGINE = (() => {
       const res = decodeSaveCodeWithReason(document.getElementById('saveCodeIn').value);
       if (!res.data) return showToast('❌ ' + res.error);
       const decoded = res.data;
+      decoded.speed = 0; // S14-2 & S16-1: Keep paused & sync speed button on Settings restore too
       state = decoded; waitingClients = []; agents = [];
-      applyBranchMap(); rebuildStaffAgents(false); autoSave(); closeModal(); renderHUD(); renderMapOverlays(); renderTutorial();
-      showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day}!`);
+      lastPhase = getPhase(state.minutes).key;
+      document.getElementById('btnSpeed').textContent = '⏸';
+      applyBranchMap(); rebuildStaffAgents(false); restoreSavedWaitingClients();
+      autoSave(); closeModal(); renderHUD(); renderMapOverlays(true); renderTutorial();
+      showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day} (tạm dừng)!`);
     };
   }
 
@@ -2410,6 +2414,38 @@ window.STARUP_ENGINE = (() => {
     };
   }
 
+  function restoreSavedWaitingClients() {
+    if (!state || !Array.isArray(state.savedWaitingClients) || !state.savedWaitingClients.length) return;
+    const phase = getPhase(state.minutes);
+    if (phase.key === 'night' || phase.key === 'lunch') {
+      state.savedWaitingClients = [];
+      return;
+    }
+    state.savedWaitingClients.forEach((sc, idx) => {
+      const rc = CFG.ROOMS.find(r => r.id === sc.roomId);
+      if (!rc || !state.rooms[rc.id] || !state.rooms[rc.id].unlocked) return;
+      const slotIdx = Math.min(CLIENT_SLOTS.length - 1, Math.max(0, sc.slotIdx !== undefined ? sc.slotIdx : idx));
+      const slot = CLIENT_SLOTS[slotIdx];
+      const cid = 'cli_res_' + Date.now() + '_' + idx;
+      const clientObj = {
+        id: cid, slotIdx, slotX: slot.x, slotY: slot.y,
+        roomId: rc.id, roomName: rc.name, roomIcon: rc.icon,
+        title: sc.title, reward: sc.reward, duration: sc.duration,
+        tier: sc.tier, isVIP: !!sc.isVIP, stars: sc.stars || 2,
+        penalty: sc.penalty || 0, patience: Math.max(3, sc.patience || 20), arrived: true
+      };
+      waitingClients.push(clientObj);
+      agents.push({
+        id: cid, role: 'client', roleKey: clientObj.isVIP ? 'vip' : 'client',
+        node: slot.node, x: slot.x, y: slot.y,
+        path: [], wait: 999, badge: clientObj.tier === 'mega' ? '🌟' : (clientObj.tier === 'rush' ? '⚡' : (clientObj.isVIP ? '💎' : '💼')),
+        speed: 15, targetSlot: slotIdx
+      });
+    });
+    state.savedWaitingClients = [];
+    renderAgents();
+  }
+
   function beginGameplay(isNew) {
     document.getElementById('introOverlay').classList.add('hidden');
     document.getElementById('gameScreen').classList.remove('intro-active');
@@ -2421,31 +2457,7 @@ window.STARUP_ENGINE = (() => {
     lastPhase = getPhase(state.minutes).key;
     applyBranchMap();
     rebuildStaffAgents(isNew);
-    if (!isNew && Array.isArray(state.savedWaitingClients) && state.savedWaitingClients.length && lastPhase !== 'night') {
-      state.savedWaitingClients.forEach((sc, idx) => {
-        const rc = CFG.ROOMS.find(r => r.id === sc.roomId);
-        if (!rc || !state.rooms[rc.id] || !state.rooms[rc.id].unlocked) return;
-        const slotIdx = Math.min(CLIENT_SLOTS.length - 1, Math.max(0, sc.slotIdx !== undefined ? sc.slotIdx : idx));
-        const slot = CLIENT_SLOTS[slotIdx];
-        const cid = 'cli_res_' + Date.now() + '_' + idx;
-        const clientObj = {
-          id: cid, slotIdx, slotX: slot.x, slotY: slot.y,
-          roomId: rc.id, roomName: rc.name, roomIcon: rc.icon,
-          title: sc.title, reward: sc.reward, duration: sc.duration,
-          tier: sc.tier, isVIP: !!sc.isVIP, stars: sc.stars || 2,
-          penalty: sc.penalty || 0, patience: Math.max(3, sc.patience || 20), arrived: true
-        };
-        waitingClients.push(clientObj);
-        agents.push({
-          id: cid, role: 'client', roleKey: clientObj.isVIP ? 'vip' : 'client',
-          node: slot.node, x: slot.x, y: slot.y,
-          path: [], wait: 999, badge: clientObj.tier === 'mega' ? '🌟' : (clientObj.tier === 'rush' ? '⚡' : (clientObj.isVIP ? '💎' : '💼')),
-          speed: 15, targetSlot: slotIdx
-        });
-      });
-      state.savedWaitingClients = [];
-      renderAgents();
-    }
+    if (!isNew) restoreSavedWaitingClients();
     autoSave(); renderHUD(); renderMapOverlays(true); renderTutorial();
     if (isNew) {
       clientSpawnCooldown = 2.5;
