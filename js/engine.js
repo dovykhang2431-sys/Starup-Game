@@ -309,13 +309,17 @@ window.STARUP_ENGINE = (() => {
     try {
       jsonStr = decodeURIComponent(escape(atob(b64)));
     } catch (e) {
-      return { data: null, error: `Mã bị cắt ngắn hoặc thiếu ký tự ở đuôi (hiện có ${raw.length} ký tự).` };
+      return { data: null, error: `Mã không hợp lệ — sai ký tự hoặc bị thiếu phần cuối (hiện có ${raw.length} ký tự). Hãy kiểm tra lại từng ký tự hoặc sao chép lại mã.` };
     }
     let parsed = null;
     try {
       parsed = JSON.parse(jsonStr);
     } catch (e) {
-      return { data: null, error: `Mã bị cắt giữa chừng nên dữ liệu chưa đóng ngoặc (hiện có ${raw.length} ký tự).` };
+      const isTruncated = !jsonStr.trim().endsWith('}') || /Unexpected end/i.test(String(e && e.message || ''));
+      if (isTruncated) {
+        return { data: null, error: `Mã bị cắt giữa chừng (thiếu phần cuối, hiện có ${raw.length} ký tự). Hãy sao chép lại toàn bộ mã.` };
+      }
+      return { data: null, error: `Mã không hợp lệ do sai ký tự bên trong — hãy kiểm tra lại từng ký tự hoặc sao chép lại toàn bộ mã (hiện có ${raw.length} ký tự).` };
     }
     if (isV2 && parsed && parsed.v === 2 && Array.isArray(parsed.c) && Array.isArray(parsed.g)) {
       return { data: unpackCompactState(parsed), error: null };
@@ -973,7 +977,7 @@ window.STARUP_ENGINE = (() => {
     waitingClients.forEach(c => {
       if (!c.arrived) return;
       const tEl = document.getElementById('cli-pat-' + c.id);
-      if (tEl) tEl.textContent = state.tutorialStep === 1 ? 'Nhận!' : `${Math.ceil(c.patience)}s`;
+      if (tEl) { const isLunchNow = getPhase(state.minutes).key === 'lunch'; tEl.textContent = state.tutorialStep === 1 ? 'Nhận!' : (isLunchNow ? `🍚 ${Math.ceil(c.patience)}s` : `${Math.ceil(c.patience)}s`); }
     });
   }
 
@@ -1965,18 +1969,28 @@ window.STARUP_ENGINE = (() => {
       } catch (e) {}
       showToast(`${TICK_SVG}Đã sao chép mã khôi phục!`);
     };
-    document.getElementById('btnRestoreCode').onclick = () => {
+    const btnRestoreSettingsEl = document.getElementById('btnRestoreCode');
+    let restoreBusy = false;
+    const handleSettingsRestore = (e) => {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (restoreBusy) return;
+      restoreBusy = true;
+      setTimeout(() => { restoreBusy = false; }, 350);
+      if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
       const res = decodeSaveCodeWithReason(document.getElementById('saveCodeIn').value);
       if (!res.data) return showToast('❌ ' + res.error);
       const decoded = res.data;
-      decoded.speed = 0; // S14-2 & S16-1: Keep paused & sync speed button on Settings restore too
+      decoded.speed = 0; // S14-2, S16-1 & S17-2: Immediately apply paused state, update HUD & close Settings modal on first tap
       state = decoded; waitingClients = []; agents = [];
       lastPhase = getPhase(state.minutes).key;
       document.getElementById('btnSpeed').textContent = '⏸';
       applyBranchMap(); rebuildStaffAgents(false); restoreSavedWaitingClients();
-      autoSave(); closeModal(); renderHUD(); renderMapOverlays(true); renderTutorial();
+      renderHUD(); renderMapOverlays(true); renderTutorial();
+      autoSave(); closeModal();
       showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day} (tạm dừng)!`);
     };
+    btnRestoreSettingsEl.addEventListener('pointerdown', handleSettingsRestore);
+    btnRestoreSettingsEl.onclick = handleSettingsRestore;
   }
 
   // ==================== HUD RENDER ====================
@@ -2145,14 +2159,14 @@ window.STARUP_ENGINE = (() => {
         if (phase.key !== lastPhase) {
           lastPhase = phase.key;
           if (phase.key === 'lunch') {
-            showToast('🍚 12:00 Nghỉ trưa — Nhân viên ra khu Pantry/Sảnh nghỉ ngơi!');
+            showToast('🍚 12:00 Nghỉ trưa — Nhân viên nghỉ ngơi (đơn chờ ở sảnh được giữ nguyên & tạm dừng đếm ngược đến 13:00)!');
             agents.forEach((a, i) => {
               if (a.role === 'staff' && !a.sickToday) {
                 const lunchSpots = state.rooms.pantry.unlocked ? ['pantryBar', 'pantryTable', 'vending'] : ['sofa', 'lobby'];
                 sendAgent(a, lunchSpots[i % lunchSpots.length], i % 2 === 0 ? '🍚' : '☕');
               }
             });
-            dismissAllClients();
+            renderMapOverlays(true);
           } else if (phase.key === 'afternoon') {
             showToast('🌤️ 13:00 — Trở lại ca chiều!');
             agents.forEach(a => { if (a.role === 'staff' && !a.sickToday) sendAgent(a, a.home, '💻'); });
@@ -2176,7 +2190,7 @@ window.STARUP_ENGINE = (() => {
 
         // S12-2: Patience countdown strictly paused while any modal is open OR during 2.5s post-modal grace window
         if (clientGraceTimer > 0) clientGraceTimer = Math.max(0, clientGraceTimer - rawDt);
-        if (state.tutorialStep !== 1 && !isAnyModalOpen() && clientGraceTimer <= 0) {
+        if (state.tutorialStep !== 1 && !isAnyModalOpen() && clientGraceTimer <= 0 && phase.key !== 'lunch') {
           const expired = [];
           waitingClients.forEach(c => {
             if (!c.arrived) return;
@@ -2401,23 +2415,31 @@ window.STARUP_ENGINE = (() => {
         <textarea id="introCodeInp" rows="3" placeholder="Dán mã STARUP-... vào đây" style="width:100%;padding:0.7cqw;border-radius:0.9cqw;border:0.14cqw solid #D8C7B2;font-size:1.05cqw;margin-bottom:0.9cqw;resize:none;word-break:break-all;"></textarea>
         <button id="btnConfirmIntroRestore" type="button" style="width:100%;padding:0.85cqw;border-radius:0.95cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Khôi phục & Vào Game</button>
       `);
-      document.getElementById('btnConfirmIntroRestore').onclick = () => {
+      const btnConfirmIntroEl = document.getElementById('btnConfirmIntroRestore');
+      let introRestoreBusy = false;
+      const handleIntroRestore = (e) => {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        if (introRestoreBusy) return;
+        introRestoreBusy = true;
+        setTimeout(() => { introRestoreBusy = false; }, 350);
+        if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
         const res = decodeSaveCodeWithReason(document.getElementById('introCodeInp').value);
         if (!res.data) return showToast('❌ ' + res.error);
         const decoded = res.data;
-        decoded.speed = 0; // S14-2: Start paused after code restore so time never drifts before player inspects
-        decoded.speed = 0; // S14-2: Start paused after code restore
-      state = decoded; closeModal(); beginGameplay(false);
-      showToast('⏸️ Đã khôi phục tiến độ ở trạng thái tạm dừng — bấm nút ⏸ để tiếp tục!');
+        decoded.speed = 0; // S14-2 & S17-2: Apply real state & HUD before closing modal so Day 1 placeholder never flashes
+        state = decoded;
+        beginGameplay(false);
+        closeModal();
         showToast('⏸️ Đã khôi phục tiến độ ở trạng thái tạm dừng — bấm nút ⏸ để tiếp tục!');
       };
+      btnConfirmIntroEl.addEventListener('pointerdown', handleIntroRestore);
+      btnConfirmIntroEl.onclick = handleIntroRestore;
     };
   }
 
   function restoreSavedWaitingClients() {
     if (!state || !Array.isArray(state.savedWaitingClients) || !state.savedWaitingClients.length) return;
-    const phase = getPhase(state.minutes);
-    if (phase.key === 'night' || phase.key === 'lunch') {
+    if (state.dailyClosed) {
       state.savedWaitingClients = [];
       return;
     }
@@ -2447,18 +2469,22 @@ window.STARUP_ENGINE = (() => {
   }
 
   function beginGameplay(isNew) {
-    document.getElementById('introOverlay').classList.add('hidden');
-    document.getElementById('gameScreen').classList.remove('intro-active');
+    // S17-2: Populate real HUD, map, staff & waiting clients BEFORE revealing game screen so Day 1 placeholder never flashes
     document.getElementById('btnSpeed').textContent = state.speed === 0 ? '⏸' : (state.speed || 1) + 'x';
-    AUD.startBGM();
-    AUD.playSFX('bell');
     waitingClients = [];
     agents = [];
     lastPhase = getPhase(state.minutes).key;
     applyBranchMap();
     rebuildStaffAgents(isNew);
     if (!isNew) restoreSavedWaitingClients();
-    autoSave(); renderHUD(); renderMapOverlays(true); renderTutorial();
+    renderHUD();
+    renderMapOverlays(true);
+    renderTutorial();
+    document.getElementById('introOverlay').classList.add('hidden');
+    document.getElementById('gameScreen').classList.remove('intro-active');
+    AUD.startBGM();
+    AUD.playSFX('bell');
+    autoSave();
     if (isNew) {
       clientSpawnCooldown = 2.5;
       showToast(`🎉 Chào mừng CEO ${state.ceoName} đến với ${state.companyName}!`);
