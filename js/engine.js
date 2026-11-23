@@ -71,6 +71,7 @@ window.STARUP_ENGINE = (() => {
       dayPenalty: 0,
       dailyCompletedJobs: [],
       eventTriggeredToday: false,
+      pendingEvent: null,
       lastPowerOutageDay: -10,
       lastStaffSickDay: -10,
       lastMacroWaveDay: -10,
@@ -177,6 +178,9 @@ window.STARUP_ENGINE = (() => {
       })(),
       nw: (st.newsList && st.newsList.length)
         ? st.newsList.slice(0, 8).map(x => [x.day || st.day || 1, x.text || ''])
+        : 0,
+      pe: (st.pendingEvent && st.pendingEvent.kind)
+        ? [st.pendingEvent.kind, st.pendingEvent.roomId || '']
         : 0
     };
   }
@@ -286,6 +290,9 @@ window.STARUP_ENGINE = (() => {
         duration: x[4] || 10, tier: x[5] === 1 ? 'rush' : (x[5] === 2 ? 'mega' : 'normal'),
         isVIP: !!x[6], stars: x[7] || 2, penalty: x[8] || 0, patience: Math.max(3, x[9] || 20)
       }));
+    }
+    if (Array.isArray(d.pe) && d.pe[0]) {
+      baseSt.pendingEvent = { kind: d.pe[0], roomId: d.pe[1] || '' };
     }
     return baseSt;
   }
@@ -1331,9 +1338,8 @@ window.STARUP_ENGINE = (() => {
     if (state.day < 2 || state.eventTriggeredToday) return;
     state.eventTriggeredToday = true;
 
-    const hasFin = state.rooms.finance.unlocked;
     const workRooms = CFG.ROOMS.filter(r => r.baseReward > 0 && state.rooms[r.id].unlocked);
-    const targetRoom = workRooms[Math.floor(Math.random() * workRooms.length)] || CFG.ROOMS[1];
+    const defaultRoom = workRooms[Math.floor(Math.random() * workRooms.length)] || CFG.ROOMS[1];
 
     const pool = [];
     if ((state.day - (state.lastPowerOutageDay !== undefined ? state.lastPowerOutageDay : -10)) >= 6) pool.push('power_outage');
@@ -1348,14 +1354,38 @@ window.STARUP_ENGINE = (() => {
     const activePool = nonDupPool.length ? nonDupPool : basePool;
     const kind = activePool[Math.floor(Math.random() * activePool.length)];
     state.lastEventKind = kind;
-    if (kind === 'tax_audit') state.lastTaxAuditDay = state.day;
-    else if (kind === 'industry_boom') state.lastIndustryBoomDay = state.day;
-    else if (kind === 'partner_promo') state.lastPartnerPromoDay = state.day;
-    autoSave();
-    AUD.playSFX('alert');
 
+    let chosenRoom = defaultRoom;
     if (kind === 'power_outage') {
       state.lastPowerOutageDay = state.day;
+    } else if (kind === 'staff_sick') {
+      const altRooms = workRooms.filter(r => r.id !== state.lastSickRoomId);
+      chosenRoom = altRooms.length ? altRooms[Math.floor(Math.random() * altRooms.length)] : defaultRoom;
+      state.lastStaffSickDay = state.day;
+      state.lastSickRoomId = chosenRoom.id;
+    } else if (kind === 'tax_audit') {
+      state.lastTaxAuditDay = state.day;
+    } else if (kind === 'industry_boom') {
+      state.lastIndustryBoomDay = state.day;
+    } else if (kind === 'partner_promo') {
+      state.lastPartnerPromoDay = state.day;
+    } else if (kind === 'macro_wave') {
+      state.lastMacroWaveDay = state.day;
+    }
+
+    // S19-1: Persist pendingEvent immediately BEFORE opening modal so reload restores it intact for ALL event kinds
+    state.pendingEvent = { kind, roomId: chosenRoom ? chosenRoom.id : '' };
+    autoSave();
+    AUD.playSFX('alert');
+    showRandomEventModal(kind, chosenRoom ? chosenRoom.id : '', false);
+  }
+
+  function showRandomEventModal(kind, roomId, isRestore = false) {
+    if (!state || !kind) return;
+    const hasFin = state.rooms.finance && state.rooms.finance.unlocked;
+    const targetRoom = CFG.ROOMS.find(r => r.id === roomId) || CFG.ROOMS[1];
+
+    if (kind === 'power_outage') {
       const fixCost = state.day <= 5 ? 150 : 280;
       openModal(`⚡ Biến Cố: Chập điện tại ${targetRoom.name}!`, `
         <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Đường dây tại <strong>${targetRoom.name}</strong> vừa gặp sự cố. Nếu không sửa ngay, phòng này sẽ <strong>tạm ngừng</strong> trong hôm nay (đơn đang chạy sẽ được giữ lại).</p>
@@ -1366,21 +1396,16 @@ window.STARUP_ENGINE = (() => {
       `);
       document.getElementById('evA').onclick = () => {
         if (state.money < fixCost) return showToast(`Không đủ $${fixCost} tiền mặt — hãy chọn phương án B!`);
-        state.money -= fixCost; closeModal(); autoSave(); showToast(`${TICK_SVG}Đã sửa xong sự cố điện tại ${targetRoom.name}!`); renderHUD();
+        state.money -= fixCost; state.pendingEvent = null; closeModal(); autoSave(); showToast(`${TICK_SVG}Đã sửa xong sự cố điện tại ${targetRoom.name}!`); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
         state.disabledRoomId = targetRoom.id;
         state.activeEventTag = `🔧 ${targetRoom.name} tạm ngừng do chập điện`;
-        // Pause room without deleting running job so progress is preserved!
+        state.pendingEvent = null;
         closeModal(); autoSave(); showToast(`⚡ ${targetRoom.name} đã tạm khóa trên bản đồ!`); renderHUD(); renderMapOverlays();
       };
     } else if (kind === 'staff_sick') {
-      const altRooms = workRooms.filter(r => r.id !== state.lastSickRoomId);
-      const sickRoom = altRooms.length ? altRooms[Math.floor(Math.random() * altRooms.length)] : targetRoom;
-      state.lastStaffSickDay = state.day;
-      state.lastSickRoomId = sickRoom.id;
-      autoSave();
-      const targetRoomSick = sickRoom;
+      const targetRoomSick = targetRoom;
       openModal(`🤒 Biến Cố: Nhân viên ${targetRoomSick.name} xin nghỉ ốm`, `
         <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Một nhân sự ở <strong>${targetRoomSick.name}</strong> bị cảm nặng và xin về nhà nghỉ hôm nay, làm giảm tốc độ xử lý của phòng. <em>(Mẹo: Nếu đơn bị tạm dừng ở 50%, bấm nút "☕ Pha Cà Phê!" cạnh phòng để gỡ kẹt và chạy tiếp.)</em></p>
         <div style="display:flex;flex-direction:column;gap:0.7cqw;">
@@ -1391,11 +1416,13 @@ window.STARUP_ENGINE = (() => {
       document.getElementById('evA').onclick = () => {
         if (state.money < 260) return showToast('Không đủ $260 tiền mặt — hãy chọn phương án B!');
         state.money -= 260; state.morale = Math.min(100, state.morale + 5);
+        state.pendingEvent = null;
         closeModal(); autoSave(); showToast(`${TICK_SVG}Đã bố trí CTV thay thế & cả team rất vui (+5% Tinh thần)!`); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
         state.sickStaffRoomId = targetRoomSick.id;
         state.activeEventTag = `🤒 ${targetRoomSick.name} thiếu 1 nhân sự hôm nay`;
+        state.pendingEvent = null;
         const ag = agents.find(a => a.role === 'staff' && a.roomId === targetRoomSick.id);
         if (ag) { ag.sickToday = true; sendAgent(ag, 'outside', '🤒'); }
         closeModal(); autoSave(); showToast(`🤒 Nhân viên ${targetRoomSick.name} về nghỉ hôm nay. Nếu đơn dừng ở 50%, bấm "☕ Pha Cà Phê!" cạnh phòng để gỡ kẹt!`); renderHUD();
@@ -1415,16 +1442,15 @@ window.STARUP_ENGINE = (() => {
       `);
       if (hasFin) {
         document.getElementById('evFinPass').onclick = () => {
-          state.money += 300; state.stars += 4; AUD.playSFX('cash'); closeModal();
+          state.money += 300; state.stars += 4; state.pendingEvent = null; AUD.playSFX('cash'); closeModal();
           autoSave();
           showToast(`${TICK_SVG}Vượt qua Thanh tra Thuế! +$300 & +4 ★`); renderHUD();
         };
       } else {
-        document.getElementById('evA').onclick = () => { if (state.money < 420) return showToast('Không đủ $420 tiền mặt — hãy chọn phương án B!'); state.money -= 420; closeModal(); autoSave(); showToast('Đã nộp phạt bổ sung -$420. Hãy sớm mở Phòng Tài Chính!'); renderHUD(); };
-        document.getElementById('evB').onclick = () => { state.stars = Math.max(0, state.stars - 4); closeModal(); autoSave(); showToast('Đã gia hạn giải trình (-4 ★ Uy tín).'); renderHUD(); };
+        document.getElementById('evA').onclick = () => { if (state.money < 420) return showToast('Không đủ $420 tiền mặt — hãy chọn phương án B!'); state.money -= 420; state.pendingEvent = null; closeModal(); autoSave(); showToast('Đã nộp phạt bổ sung -$420. Hãy sớm mở Phòng Tài Chính!'); renderHUD(); };
+        document.getElementById('evB').onclick = () => { state.stars = Math.max(0, state.stars - 4); state.pendingEvent = null; closeModal(); autoSave(); showToast('Đã gia hạn giải trình (-4 ★ Uy tín).'); renderHUD(); };
       }
     } else if (kind === 'industry_boom') {
-      autoSave();
       openModal('🚀 Cơ Hội Thị Trường: Làn Sóng Khách Hàng Mới', `
         <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Nhu cầu thị trường bất ngờ tăng mạnh hôm nay! Cổ phiếu <strong>[TECH] tăng +12%</strong> và khách hàng sẵn sàng chi tiêu nhiều hơn.</p>
         <div style="display:flex;flex-direction:column;gap:0.7cqw;">
@@ -1432,12 +1458,16 @@ window.STARUP_ENGINE = (() => {
           <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#EA580C;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">B. Chi $180 đẩy quảng bá chớp nhoáng (+4 ★ & +30% khách hôm nay)</button>
         </div>
       `);
-      FIN.updateStockPrices(state, { TECH: 0.12, REAL: 0.05 });
-      addNews('🚀 Làn sóng nhu cầu mới: [TECH] tăng mạnh +12%, thị trường khởi sắc!');
+      if (!isRestore) {
+        FIN.updateStockPrices(state, { TECH: 0.12, REAL: 0.05 });
+        addNews('🚀 Làn sóng nhu cầu mới: [TECH] tăng mạnh +12%, thị trường khởi sắc!');
+        autoSave();
+      }
       document.getElementById('evA').onclick = () => {
         state.morale = Math.min(100, state.morale + 10);
         state.stars += 2;
         state.activeEventTag = '🚀 Thị trường khởi sắc (+10% Tinh thần)';
+        state.pendingEvent = null;
         closeModal(); autoSave(); showToast(`${TICK_SVG}Đội ngũ hứng khởi đón sóng thị trường (+10% Tinh thần & +2 ★)!`); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
@@ -1445,10 +1475,10 @@ window.STARUP_ENGINE = (() => {
         state.money -= 180; state.stars += 4;
         state.clientRateDebuff = 1.3;
         state.activeEventTag = '🚀 Quảng bá chớp nhoáng (+30% khách hôm nay)';
+        state.pendingEvent = null;
         closeModal(); autoSave(); showToast(`${TICK_SVG}Khách hàng đổ về sảnh! +4 ★ & +30% khách hôm nay!`); renderHUD();
       };
     } else if (kind === 'partner_promo') {
-      autoSave();
       openModal('🤝 Cơ Hội Đối Tác: Giới Thiệu Khách Hàng', `
         <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Một doanh nghiệp đối tác đánh giá cao <strong>${state.companyName}</strong> và đề nghị hợp tác giới thiệu khách hàng chéo trong hôm nay.</p>
         <div style="display:flex;flex-direction:column;gap:0.7cqw;">
@@ -1459,6 +1489,7 @@ window.STARUP_ENGINE = (() => {
       document.getElementById('evA').onclick = () => {
         state.money += 120; state.stars += 1; AUD.playSFX('cash');
         state.activeEventTag = '🤝 Đối tác giới thiệu (+$120)';
+        state.pendingEvent = null;
         closeModal(); autoSave(); showToast(`${TICK_SVG}Nhận hoa hồng đối tác +$120 & +1 ★!`); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
@@ -1467,11 +1498,10 @@ window.STARUP_ENGINE = (() => {
         state.brandAwareness = Math.min(100, (state.brandAwareness || 0) + 5);
         state.stars += 3;
         state.activeEventTag = '🤝 Đồng tài trợ hội thảo (+5% Thương hiệu)';
+        state.pendingEvent = null;
         closeModal(); autoSave(); showToast(`${TICK_SVG}Thương hiệu lan tỏa (+5% Nhận diện & +3 ★)!`); renderHUD();
       };
     } else {
-      state.lastMacroWaveDay = state.day;
-      autoSave();
       openModal('📉 Biến Cố Vĩ Mô: Thị Trường Rung Lắc Mạnh', `
         <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Kinh tế chung chững lại trong ngày: lượng khách ghé sảnh giảm 30%, mã <strong>[TECH]/[REAL]</strong> giảm điểm nhưng <strong>[GOLD] tăng vọt +16%</strong>!</p>
         <div style="display:flex;flex-direction:column;gap:0.7cqw;">
@@ -1479,16 +1509,21 @@ window.STARUP_ENGINE = (() => {
           <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#EA580C;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">B. Chi $250 khuyến mãi giữ lượng khách 100% hôm nay (+3 ★)</button>
         </div>
       `);
-      FIN.updateStockPrices(state, { TECH: -0.14, REAL: -0.10, GOLD: 0.16 });
-      addNews('📉 Biến cố thị trường: [GOLD] tăng mạnh +16%, [TECH]/[REAL] giảm điểm!');
+      if (!isRestore) {
+        FIN.updateStockPrices(state, { TECH: -0.14, REAL: -0.10, GOLD: 0.16 });
+        addNews('📉 Biến cố thị trường: [GOLD] tăng mạnh +16%, [TECH]/[REAL] giảm điểm!');
+        autoSave();
+      }
       document.getElementById('evA').onclick = () => {
         state.clientRateDebuff = 0.7;
         state.activeEventTag = '📉 Thị trường chững (-30% khách · [GOLD] +16%)';
+        state.pendingEvent = null;
         closeModal(); autoSave(); renderHUD();
       };
       document.getElementById('evB').onclick = () => {
         if (state.money < 250) return showToast('Không đủ $250 tiền mặt — hãy chọn phương án A!');
         state.money -= 250; state.stars += 3;
+        state.pendingEvent = null;
         closeModal(); autoSave(); showToast(`${TICK_SVG}Tung khuyến mãi thành công! Lượng khách giữ ổn định (+3 ★).`); renderHUD();
       };
     }
@@ -1687,6 +1722,7 @@ window.STARUP_ENGINE = (() => {
     state.clientRateDebuff = 1;
     state.activeEventTag = '';
     state.eventTriggeredToday = false;
+    state.pendingEvent = null;
     state.overtimeActive = false;
     state.happyHourCooldown = 0;
     state.dailyClosed = false;
@@ -1994,6 +2030,9 @@ window.STARUP_ENGINE = (() => {
         applyBranchMap(); rebuildStaffAgents(false); restoreSavedWaitingClients();
         renderHUD(); renderMapOverlays(true); renderTutorial();
         autoSave(); closeModal();
+        if (state.pendingEvent && state.pendingEvent.kind && !state.dailyClosed && !state.isBankrupt) {
+          showRandomEventModal(state.pendingEvent.kind, state.pendingEvent.roomId, true);
+        }
         showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day} (tạm dừng)!`);
       } catch (err) {
         console.error('Settings restore error:', err);
@@ -2446,8 +2485,8 @@ window.STARUP_ENGINE = (() => {
           const decoded = res.data;
           decoded.speed = 0; // S14-2, S17-2 & S18-1: Apply real state & HUD before closing modal
           state = decoded;
-          beginGameplay(false);
           closeModal();
+          beginGameplay(false);
           showToast('⏸️ Đã khôi phục tiến độ ở trạng thái tạm dừng — bấm nút ⏸ để tiếp tục!');
         } catch (err) {
           console.error('Intro restore error:', err);
@@ -2514,6 +2553,10 @@ window.STARUP_ENGINE = (() => {
       // Lỗi N1 Rescue: If loaded save was stuck near/past closing time (e.g. 17:55 overtime), smoothly finish & open End-of-Day report!
       const closeMin = state.overtimeActive ? 1080 : 1020;
       if (state.isBankrupt) { showBankruptcyScreen(); return; }
+      if (state.pendingEvent && state.pendingEvent.kind && !state.dailyClosed) {
+        showRandomEventModal(state.pendingEvent.kind, state.pendingEvent.roomId, true);
+        return;
+      }
       if (!state.dailyClosed && ((state.overtimeActive && state.minutes >= 1074) || state.minutes >= closeMin)) {
         state.minutes = Math.max(state.minutes, closeMin + 1);
         lastPhase = 'night';
