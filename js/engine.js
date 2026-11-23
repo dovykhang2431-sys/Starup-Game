@@ -27,6 +27,7 @@ window.STARUP_ENGINE = (() => {
   let lastDrawerMoney = null;
   let moneyDisplayMode = 'auto'; // 'auto' | 'exact' | 'compact'
   let autoSaveAccum = 0;
+  let clientGraceTimer = 0;
 
   const CLIENT_SLOTS = [
     { node: 'reception', x: 48, y: 54 },
@@ -587,11 +588,18 @@ window.STARUP_ENGINE = (() => {
     } catch (e) {}
   }
 
+  function isAnyModalOpen() {
+    const mo = document.getElementById('modalOverlay');
+    const io = document.getElementById('introOverlay');
+    return (mo && !mo.classList.contains('hidden')) || (io && !io.classList.contains('hidden'));
+  }
   function openModal(title, html) {
     if (state && state.selectedRoom) {
       state.selectedRoom = null;
       renderDrawer();
     }
+    // S12-2: Ensure waiting clients never expire right as any modal interrupts the screen
+    waitingClients.forEach(c => { if (c.arrived && c.patience < 6) c.patience = 6; });
     resetViewportScroll();
     document.getElementById('modalTitle').innerHTML = title;
     document.getElementById('modalBody').innerHTML = html;
@@ -600,6 +608,9 @@ window.STARUP_ENGINE = (() => {
   }
   function closeModal() {
     document.getElementById('modalOverlay').classList.add('hidden');
+    // S12-2: Reset frame delta & grant 2.5s grace window so players can click waiting clients after closing any modal
+    lastTs = performance.now();
+    clientGraceTimer = 2.5;
   }
 
   // ==================== TUTORIAL ====================
@@ -1061,15 +1072,16 @@ window.STARUP_ENGINE = (() => {
             renderMapOverlays(true);
           });
           layer.appendChild(btn);
-          const pausedPill = document.createElement('div');
-          pausedPill.className = 'work-progress-pill';
-          pausedPill.style.left = rc.chipPos.x + '%';
-          pausedPill.style.top = (rc.chipPos.y + 5.5) + '%';
-          pausedPill.innerHTML = `
-            <div id="prog-txt-${rc.id}" style="font-size:0.88cqw;font-weight:800;color:#DC2626;text-align:center;">⏸️ ${Math.min(100, Math.floor(j.progress || 0))}%</div>
-            <div class="work-progress-bar"><div id="prog-bar-${rc.id}" class="work-progress-fill" style="width:${Math.min(100, Math.floor(j.progress || 0))}%;background:#F59E0B;"></div></div>
+          const stuckPill = document.createElement('div');
+          stuckPill.className = 'work-progress-pill stuck-pill';
+          stuckPill.style.left = rc.chipPos.x + '%';
+          stuckPill.style.top = (rc.chipPos.y + 5.5) + '%';
+          const stuckPct = Math.min(100, Math.floor(j.progress || 0));
+          stuckPill.innerHTML = `
+            <div id="prog-txt-${rc.id}" style="font-size:0.88cqw;font-weight:900;color:#B91C1C;text-align:center;">${isServer ? '🔧' : '☕'} Kẹt! ${stuckPct}%</div>
+            <div class="work-progress-bar" style="background:#FECACA;"><div id="prog-bar-${rc.id}" class="work-progress-fill" style="width:${stuckPct}%;background:#DC2626;"></div></div>
           `;
-          layer.appendChild(pausedPill);
+          layer.appendChild(stuckPill);
         } else {
           const pill = document.createElement('div');
           pill.className = 'work-progress-pill';
@@ -2059,7 +2071,7 @@ window.STARUP_ENGINE = (() => {
     lastTs = now;
 
     if (state && document.getElementById('introOverlay').classList.contains('hidden')) {
-      const modalOpen = !document.getElementById('modalOverlay').classList.contains('hidden');
+      const modalOpen = isAnyModalOpen();
       const simMult = (state.speed === 0 || modalOpen) ? 0 : state.speed;
       const dt = rawDt * simMult;
 
@@ -2087,7 +2099,10 @@ window.STARUP_ENGINE = (() => {
         }
 
         if (state.day >= 2 && !state.eventTriggeredToday && state.minutes >= 600 && state.minutes < 880) {
-          if (Math.random() < dt * 0.08) triggerRandomEvent();
+          if (Math.random() < dt * 0.08) {
+            triggerRandomEvent();
+            if (isAnyModalOpen()) { rafId = requestAnimationFrame(tick); return; }
+          }
         }
 
         const phase = getPhase(state.minutes);
@@ -2123,8 +2138,9 @@ window.STARUP_ENGINE = (() => {
           }
         }
 
-        // Patience countdown for all waiting clients (strictly paused while any modal is open because dt === 0)
-        if (state.tutorialStep !== 1) {
+        // S12-2: Patience countdown strictly paused while any modal is open OR during 2.5s post-modal grace window
+        if (clientGraceTimer > 0) clientGraceTimer = Math.max(0, clientGraceTimer - rawDt);
+        if (state.tutorialStep !== 1 && !isAnyModalOpen() && clientGraceTimer <= 0) {
           const expired = [];
           waitingClients.forEach(c => {
             if (!c.arrived) return;
@@ -2389,6 +2405,15 @@ window.STARUP_ENGINE = (() => {
     };
     document.getElementById('btnBypassPortrait').onclick = () => document.body.classList.add('bypass-portrait');
     document.getElementById('btnCloseModal').onclick = closeModal;
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const mo = document.getElementById('modalOverlay');
+        const btnX = document.getElementById('btnCloseModal');
+        if (mo && !mo.classList.contains('hidden') && btnX && !btnX.classList.contains('hidden')) {
+          closeModal();
+        }
+      }
+    });
     document.getElementById('btnCloseDrawer').onclick = () => { state.selectedRoom = null; renderMapOverlays(); renderDrawer(); };
     document.getElementById('btnSkipTutorial').onclick = () => { if (state) { state.tutorialStep = 0; renderTutorial(); autoSave(); } };
     document.getElementById('btnSpeed').onclick = () => {
