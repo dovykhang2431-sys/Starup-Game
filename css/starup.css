@@ -659,7 +659,7 @@ html, body {
 .modal-overlay {
   position: absolute;
   inset: 0;
-  z-index: 60;
+  z-index: 80;
   background: rgba(58, 41, 30, 0.62);
   backdrop-filter: blur(4px);
   display: flex;

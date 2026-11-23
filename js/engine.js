@@ -139,7 +139,28 @@ window.STARUP_ENGINE = (() => {
       f: st.fundingTaken || [],
       p: st.products || {},
       rv: st.acquiredRivals || [],
-      mk: st.marketingCampaign ? [st.marketingCampaign.id, st.marketingCampaign.daysLeft] : 0
+      mk: st.marketingCampaign ? [st.marketingCampaign.id, st.marketingCampaign.daysLeft] : 0,
+      jb: (() => {
+        const map = {};
+        CFG.ROOMS.forEach(rc => {
+          const r = st.rooms[rc.id];
+          if (r && r.job) {
+            const j = r.job;
+            const tierCode = j.tier === 'rush' ? 1 : (j.tier === 'mega' ? 2 : 0);
+            const issueCode = j.issue === 'coffee' ? 1 : (j.issue === 'server' ? 2 : 0);
+            map[rc.id] = [
+              j.title, Math.round(j.reward || 0), tierCode, j.stars || 2, j.isVIP ? 1 : 0,
+              Math.round(j.penalty || 0), Math.min(100, Math.round(j.progress || 0)),
+              Math.round((j.duration || 10) * 10) / 10, issueCode, j.issueChecked ? 1 : 0,
+              j.ready ? 1 : 0, Math.round(j.acceptedAtMin || 0)
+            ];
+          }
+        });
+        return Object.keys(map).length ? map : 0;
+      })(),
+      dn: (st.dailyCompletedJobs && st.dailyCompletedJobs.length)
+        ? st.dailyCompletedJobs.slice(0, 8).map(x => [x.title, x.roomName, x.roomIcon, Math.round(x.reward || 0), x.stars || 2, x.time || ''])
+        : 0
     };
   }
 
@@ -186,7 +207,25 @@ window.STARUP_ENGINE = (() => {
       CFG.ROOMS.forEach(rc => {
         const arr = d.r[rc.id];
         if (Array.isArray(arr)) {
-          baseSt.rooms[rc.id] = { unlocked: !!arr[0], staff: arr[1] || 0, equipLv: arr[2] || 1, speedLv: arr[3] || 1, hasManager: !!arr[4], job: null };
+          let restoredJob = null;
+          if (d.jb && Array.isArray(d.jb[rc.id])) {
+            const ja = d.jb[rc.id];
+            restoredJob = {
+              title: ja[0] || 'Hợp đồng',
+              reward: ja[1] || 0,
+              tier: ja[2] === 1 ? 'rush' : (ja[2] === 2 ? 'mega' : 'normal'),
+              stars: ja[3] || 2,
+              isVIP: !!ja[4],
+              penalty: ja[5] || 0,
+              progress: ja[6] || 0,
+              duration: ja[7] || 10,
+              issue: ja[8] === 1 ? 'coffee' : (ja[8] === 2 ? 'server' : null),
+              issueChecked: !!ja[9],
+              ready: !!ja[10],
+              acceptedAtMin: ja[11] || 0
+            };
+          }
+          baseSt.rooms[rc.id] = { unlocked: !!arr[0], staff: arr[1] || 0, equipLv: arr[2] || 1, speedLv: arr[3] || 1, hasManager: !!arr[4], job: restoredJob };
         }
       });
     }
@@ -212,6 +251,12 @@ window.STARUP_ENGINE = (() => {
       if (mc) baseSt.marketingCampaign = { id: mc.id, name: mc.name, icon: mc.icon, daysLeft: d.mk[1], spawnBoost: mc.spawnBoost, rewardMult: mc.rewardMult, vipChance: mc.vipChance };
     }
     baseSt.dailyQuests = QST.generateDailyQuests(baseSt.day);
+    if (Array.isArray(d.dn)) {
+      baseSt.dailyCompletedJobs = d.dn.map(x => ({
+        title: x[0] || '', roomName: x[1] || '', roomIcon: x[2] || '📋',
+        reward: x[3] || 0, stars: x[4] || 2, time: x[5] || ''
+      }));
+    }
     baseSt.newsList = [{ day: baseSt.day, text: `Chào mừng CEO ${baseSt.ceoName} trở lại điều hành ${baseSt.companyName} (Ngày ${baseSt.day})!` }];
     baseSt.newsHint = baseSt.newsList[0].text;
     return baseSt;
@@ -604,7 +649,9 @@ window.STARUP_ENGINE = (() => {
 
     const workRooms = CFG.ROOMS.filter(r => r.baseReward > 0 && state.rooms[r.id].unlocked && r.id !== state.disabledRoomId);
     if (!workRooms.length) return;
-    const targetRoom = workRooms[Math.floor(Math.random() * workRooms.length)];
+    const freeLobbyRooms = workRooms.filter(r => !waitingClients.some(c => c.roomId === r.id));
+    if (!freeLobbyRooms.length) return;
+    const targetRoom = freeLobbyRooms[Math.floor(Math.random() * freeLobbyRooms.length)];
     const rs = state.rooms[targetRoom.id];
     const titles = CFG.CONTRACT_TEMPLATES[targetRoom.id];
     const title = titles[Math.floor(Math.random() * titles.length)];
@@ -712,7 +759,7 @@ window.STARUP_ENGINE = (() => {
     rs.job = {
       title: c.title, reward: c.reward, tier: c.tier,
       stars: c.stars || (c.tier === 'mega' ? 5 : (c.isVIP ? 3 : 2)), isVIP: !!c.isVIP, penalty: c.penalty || (c.tier === 'rush' ? Math.min(250, Math.round(c.reward * 0.5)) : 0),
-      progress: 0, duration: c.duration, issue: null, issueChecked: false, ready: false
+      progress: 0, duration: c.duration, issue: null, issueChecked: false, ready: false, acceptedAtMin: Math.round(state.minutes || 0)
     };
     AUD.playSFX('click');
     showToast(`${TICK_SVG}Đã giao "${c.title}" cho ${c.roomName}!`);
@@ -1007,6 +1054,15 @@ window.STARUP_ENGINE = (() => {
             renderMapOverlays(true);
           });
           layer.appendChild(btn);
+          const pausedPill = document.createElement('div');
+          pausedPill.className = 'work-progress-pill';
+          pausedPill.style.left = rc.chipPos.x + '%';
+          pausedPill.style.top = (rc.chipPos.y + 5.5) + '%';
+          pausedPill.innerHTML = `
+            <div id="prog-txt-${rc.id}" style="font-size:0.88cqw;font-weight:800;color:#DC2626;text-align:center;">⏸️ ${Math.min(100, Math.floor(j.progress || 0))}%</div>
+            <div class="work-progress-bar"><div id="prog-bar-${rc.id}" class="work-progress-fill" style="width:${Math.min(100, Math.floor(j.progress || 0))}%;background:#F59E0B;"></div></div>
+          `;
+          layer.appendChild(pausedPill);
         } else {
           const pill = document.createElement('div');
           pill.className = 'work-progress-pill';
@@ -1409,19 +1465,24 @@ window.STARUP_ENGINE = (() => {
       }
     });
 
-    // Unfinished Normal/Mega jobs are KEPT into the next day; only unfinished Rush jobs incur fair penalty and are reported explicitly!
+    // Unfinished jobs are KEPT into the next day; Rush jobs accepted right before closing (<25m left & <15% progress) carry over without penalty, while earlier overdue Rush jobs incur fair penalty and continue next day as normal (never silently deleted)
     let rushPenalty = 0;
     let rushStarsLost = 0;
     let keptJobsCount = 0;
+    const closeMinEod = state.overtimeActive ? 1080 : 1020;
     CFG.ROOMS.forEach(rc => {
       const rs = state.rooms[rc.id];
-      if (!rs.job) return;
-      if (rs.job.tier === 'rush' && !rs.job.ready) {
-        rushPenalty += (rs.job.penalty || Math.min(250, Math.round(rs.job.reward * 0.5)));
-        rushStarsLost += 2;
-        state.stars = Math.max(0, state.stars - 2);
-        rs.job = null;
-      } else if (!rs.job.ready) {
+      if (!rs.job || rs.job.ready) return;
+      if (rs.job.tier === 'rush') {
+        const acceptedLate = (rs.job.acceptedAtMin || 0) >= (closeMinEod - 25) && (rs.job.progress || 0) < 15;
+        if (!acceptedLate) {
+          rushPenalty += (rs.job.penalty || Math.min(250, Math.round(rs.job.reward * 0.5)));
+          rushStarsLost += 2;
+          state.stars = Math.max(0, state.stars - 2);
+          rs.job.tier = 'normal';
+        }
+        keptJobsCount += 1;
+      } else {
         keptJobsCount += 1;
       }
     });
