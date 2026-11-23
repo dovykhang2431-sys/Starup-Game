@@ -20,6 +20,16 @@ window.STARUP_ENGINE = (() => {
   let activeReportTab = 'pending';
   let activeEmpireTab = 'products';
   let activeTrophyTab = 'quests';
+  let activeSettingsTab = 'general';
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
   let banterCooldown = 5.5;
   let toastTimer = null;
   let saveDotTimer = null;
@@ -28,6 +38,7 @@ window.STARUP_ENGINE = (() => {
   let moneyDisplayMode = 'auto'; // 'auto' | 'exact' | 'compact'
   let autoSaveAccum = 0;
   let clientGraceTimer = 0;
+  let lastPlaySpeed = 1;
 
   const CLIENT_SLOTS = [
     { node: 'reception', x: 48, y: 54 },
@@ -72,6 +83,11 @@ window.STARUP_ENGINE = (() => {
       dailyCompletedJobs: [],
       eventTriggeredToday: false,
       pendingEvent: null,
+      relaxedMode: false,
+      dayAcceptedCount: 0,
+      dayExpiredCount: 0,
+      roomSickLastDay: {},
+      roomStats: {},
       lastPowerOutageDay: -10,
       lastStaffSickDay: -10,
       lastMacroWaveDay: -10,
@@ -132,7 +148,8 @@ window.STARUP_ENGINE = (() => {
         st.clientRateDebuff !== undefined ? st.clientRateDebuff : 1, st.activeEventTag || '',
         st.lastTaxAuditDay !== undefined ? st.lastTaxAuditDay : -10,
         st.lastIndustryBoomDay !== undefined ? st.lastIndustryBoomDay : -10,
-        st.lastPartnerPromoDay !== undefined ? st.lastPartnerPromoDay : -10
+        st.lastPartnerPromoDay !== undefined ? st.lastPartnerPromoDay : -10,
+        st.relaxedMode ? 1 : 0, st.dayAcceptedCount || 0, st.dayExpiredCount || 0
       ],
       r: rm,
       l: st.loan ? [st.loan.name, st.loan.dailyPay, st.loan.daysLeft] : 0,
@@ -181,7 +198,9 @@ window.STARUP_ENGINE = (() => {
         : 0,
       pe: (st.pendingEvent && st.pendingEvent.kind)
         ? [st.pendingEvent.kind, st.pendingEvent.roomId || '']
-        : 0
+        : 0,
+      sd: (st.roomSickLastDay && Object.keys(st.roomSickLastDay).length) ? st.roomSickLastDay : 0,
+      rs: (st.roomStats && Object.keys(st.roomStats).length) ? st.roomStats : 0
     };
   }
 
@@ -223,6 +242,9 @@ window.STARUP_ENGINE = (() => {
     baseSt.lastTaxAuditDay = g[32] !== undefined ? g[32] : -10;
     baseSt.lastIndustryBoomDay = g[33] !== undefined ? g[33] : -10;
     baseSt.lastPartnerPromoDay = g[34] !== undefined ? g[34] : -10;
+    baseSt.relaxedMode = !!g[35];
+    baseSt.dayAcceptedCount = g[36] || 0;
+    baseSt.dayExpiredCount = g[37] || 0;
 
     if (d.r) {
       CFG.ROOMS.forEach(rc => {
@@ -281,7 +303,7 @@ window.STARUP_ENGINE = (() => {
     if (Array.isArray(d.nw) && d.nw.length) {
       baseSt.newsList = d.nw.map(x => ({ day: x[0] || baseSt.day, text: x[1] || '' })).filter(x => x.text);
     } else {
-      baseSt.newsList = [{ day: baseSt.day, text: `Chào mừng CEO ${baseSt.ceoName} trở lại điều hành ${baseSt.companyName} (Ngày ${baseSt.day})!` }];
+      baseSt.newsList = [{ day: baseSt.day, text: `Chào mừng CEO ${escapeHtml(baseSt.ceoName)} trở lại điều hành ${escapeHtml(baseSt.companyName)} (Ngày ${baseSt.day})!` }];
     }
     baseSt.newsHint = (baseSt.newsList[0] && baseSt.newsList[0].text) || '';
     if (Array.isArray(d.wc) && d.wc.length) {
@@ -294,6 +316,8 @@ window.STARUP_ENGINE = (() => {
     if (Array.isArray(d.pe) && d.pe[0]) {
       baseSt.pendingEvent = { kind: d.pe[0], roomId: d.pe[1] || '' };
     }
+    if (d.sd && typeof d.sd === 'object') baseSt.roomSickLastDay = d.sd;
+    if (d.rs && typeof d.rs === 'object') baseSt.roomStats = d.rs;
     return baseSt;
   }
 
@@ -659,7 +683,7 @@ window.STARUP_ENGINE = (() => {
     const banner = document.getElementById('tutorialBanner');
     if (!state || state.tutorialStep <= 0) { banner.classList.add('hidden'); return; }
     const steps = {
-      1: 'Bước 1/4: Chạm nút 📋 trên đầu Khách ở Sảnh để nhận hợp đồng (chú ý: để khách chờ hết giờ sẽ rời đi và trừ −2 ★)!',
+      1: 'Bước 1/4: Chạm nút 📋 trên đầu Khách ở Sảnh để nhận hợp đồng (chú ý: để khách chờ hết giờ sẽ rời đi và trừ −1 ★)!',
       2: 'Bước 2/4: Nhân viên đang làm! Nếu đơn dừng ở 50% (đuối sức/ốm), bấm nút "☕ Pha Cà Phê!" hoặc "🔧 Sửa Server!" cạnh phòng để gỡ kẹt, xong bấm 💵 thu tiền.',
       3: 'Bước 3/4: Giỏi lắm! Thử 📣 Marketing kéo khách VIP, hoặc mở Khu Pantry ($750) & Phòng Tài Chính ($1,600)!',
       4: 'Bước 4/4: Chú ý Đơn Hỏa Tốc ⚡ (phải giao trước 17:00) và Biến cố từ Ngày 2 trở đi. Chúc CEO thành công!'
@@ -735,7 +759,7 @@ window.STARUP_ENGINE = (() => {
       id: cid, slotIdx, slotX: slot.x, slotY: slot.y,
       roomId: targetRoom.id, roomName: targetRoom.name, roomIcon: targetRoom.icon,
       title, reward, duration, tier, isVIP, stars: tier === 'mega' ? 5 : (isVIP ? 3 : 2), penalty: tier === 'rush' ? Math.min(250, Math.round(reward * 0.5)) : 0,
-      patience: workCount <= 1 ? 40 : (workCount <= 3 ? 38 : 35), arrived: false
+      patience: Math.round(((isVIP || tier === 'mega') ? (workCount <= 1 ? 52 : 46) : (workCount <= 1 ? 42 : 35)) * (state.relaxedMode ? 2 : 1)), arrived: false
     };
     waitingClients.push(clientObj);
     autoSave();
@@ -815,6 +839,7 @@ window.STARUP_ENGINE = (() => {
       progress: 0, duration: c.duration, issue: null, issueChecked: false, ready: false, acceptedAtMin: Math.round(state.minutes || 0)
     };
     AUD.playSFX('click');
+    state.dayAcceptedCount = (state.dayAcceptedCount || 0) + 1;
     showToast(`${TICK_SVG}Đã giao "${c.title}" cho ${c.roomName}!`);
     dismissClient(c.id, true);
     advanceTutorial(2);
@@ -1260,6 +1285,24 @@ window.STARUP_ENGINE = (() => {
     styleUpgradeBtn('upSpeed', rs.speedLv >= 5, speedCost);
 
     const mgrCost = Math.max(1200, Math.round((rc.unlockCost || 800) * 1.1));
+    const drTipEl = document.getElementById('drTip');
+    if (drTipEl) {
+      let bestMgrRoom = null;
+      let bestScore = 0;
+      const rStats = state.roomStats || {};
+      CFG.ROOMS.forEach(r => {
+        const stR = state.rooms[r.id];
+        if (!stR || !stR.unlocked || stR.hasManager || r.baseReward <= 0) return;
+        const arr = rStats[r.id] || [0, 0];
+        const score = (arr[0] || 0) * 500 + (arr[1] || 0);
+        if (score > bestScore) { bestScore = score; bestMgrRoom = { r, stuck: arr[0] || 0, missed: arr[1] || 0 }; }
+      });
+      if (bestMgrRoom && bestScore > 0) {
+        drTipEl.innerHTML = `💡 <strong>Gợi ý Quản Lý:</strong> Nên ưu tiên mua Quản Lý cho <strong>${bestMgrRoom.r.icon} ${bestMgrRoom.r.name}</strong> (${bestMgrRoom.stuck} lần kẹt 50%${bestMgrRoom.missed > 0 ? `, ${FIN.fmtMoney(bestMgrRoom.missed)} chờ thu tay` : ''}).`;
+      } else {
+        drTipEl.innerHTML = `💡 Mẹo: Khi hợp đồng tạm dừng ở 50% (đuối sức/lỗi), bấm <strong>☕ Pha Cà Phê!</strong> hoặc <strong>🔧 Sửa Server!</strong> cạnh phòng để gỡ kẹt và chạy tiếp.`;
+      }
+    }
     const mgrBtn = document.getElementById('upMgr');
     const mgrSub = document.getElementById('upMgrSub');
     if (mgrBtn && mgrSub) {
@@ -1359,10 +1402,25 @@ window.STARUP_ENGINE = (() => {
     if (kind === 'power_outage') {
       state.lastPowerOutageDay = state.day;
     } else if (kind === 'staff_sick') {
-      const altRooms = workRooms.filter(r => r.id !== state.lastSickRoomId);
-      chosenRoom = altRooms.length ? altRooms[Math.floor(Math.random() * altRooms.length)] : defaultRoom;
+      // Priority 2: Pity timer — rooms with >= 12 days since last sick event get progressively higher selection weight
+      if (!state.roomSickLastDay || typeof state.roomSickLastDay !== 'object') state.roomSickLastDay = {};
+      const weighted = workRooms.map(r => {
+        const lastD = state.roomSickLastDay[r.id] || 0;
+        const daysSince = Math.max(0, state.day - lastD);
+        let w = (r.id === state.lastSickRoomId && workRooms.length > 1) ? 0.15 : 1.0;
+        if (daysSince >= 12) w += (daysSince - 11) * 1.6;
+        return { r, w };
+      });
+      const totalW = weighted.reduce((s, x) => s + x.w, 0);
+      let rollW = Math.random() * totalW;
+      chosenRoom = weighted[0] ? weighted[0].r : defaultRoom;
+      for (const item of weighted) {
+        rollW -= item.w;
+        if (rollW <= 0) { chosenRoom = item.r; break; }
+      }
       state.lastStaffSickDay = state.day;
       state.lastSickRoomId = chosenRoom.id;
+      state.roomSickLastDay[chosenRoom.id] = state.day;
     } else if (kind === 'tax_audit') {
       state.lastTaxAuditDay = state.day;
     } else if (kind === 'industry_boom') {
@@ -1429,7 +1487,7 @@ window.STARUP_ENGINE = (() => {
       };
     } else if (kind === 'tax_audit') {
       openModal('🧾 Biến Cố: Thanh Tra Thuế & Sổ Sách Ghé Thăm', `
-        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Đoàn kiểm tra tài chính đang rà soát chứng từ của <strong>${state.companyName}</strong>.</p>
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Đoàn kiểm tra tài chính đang rà soát chứng từ của <strong>${escapeHtml(state.companyName)}</strong>.</p>
         ${hasFin
           ? `<div style="padding:0.95cqw;border-radius:1cqw;background:#ECFDF5;border:0.13cqw solid #6EE7B7;color:#065F46;font-weight:800;margin-bottom:1cqw;">${TICK_SVG}Nhờ có <strong>Phòng Tài Chính</strong>, sổ sách hoàn toàn minh bạch! Công ty nhận thưởng +$300 & +4 ★ Uy tín!</div>
              <button id="evFinPass" type="button" style="width:100%;padding:0.9cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Nhận thưởng minh bạch</button>`
@@ -1480,7 +1538,7 @@ window.STARUP_ENGINE = (() => {
       };
     } else if (kind === 'partner_promo') {
       openModal('🤝 Cơ Hội Đối Tác: Giới Thiệu Khách Hàng', `
-        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Một doanh nghiệp đối tác đánh giá cao <strong>${state.companyName}</strong> và đề nghị hợp tác giới thiệu khách hàng chéo trong hôm nay.</p>
+        <p style="color:#5C4636;margin:0 0 1.1cqw 0;line-height:1.45;">Một doanh nghiệp đối tác đánh giá cao <strong>${escapeHtml(state.companyName)}</strong> và đề nghị hợp tác giới thiệu khách hàng chéo trong hôm nay.</p>
         <div style="display:flex;flex-direction:column;gap:0.7cqw;">
           <button id="evA" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">A. Nhận hoa hồng giới thiệu ngay (+$120 & +1 ★)</button>
           <button id="evB" type="button" style="padding:0.9cqw 1.1cqw;border-radius:1cqw;background:#2563EB;color:#fff;font-weight:800;border:none;cursor:pointer;text-align:left;">B. Chi $150 đồng tài trợ hội thảo (+5% Thương hiệu & +3 ★)</button>
@@ -1545,6 +1603,9 @@ window.STARUP_ENGINE = (() => {
         const st = (typeof j.stars === 'number' && j.stars > 0) ? j.stars : (j.tier === 'mega' ? 5 : (j.isVIP ? 3 : 2));
         autoCollectedCash += j.reward;
         autoCollectedStars += st;
+        if (!state.roomStats) state.roomStats = {};
+        if (!state.roomStats[rc.id]) state.roomStats[rc.id] = [0, 0];
+        state.roomStats[rc.id][1] = (state.roomStats[rc.id][1] || 0) + Math.round(j.reward || 0);
         deliverRoomJob(rc.id);
       }
     });
@@ -1647,7 +1708,7 @@ window.STARUP_ENGINE = (() => {
       return;
     }
 
-    openModal(`📊 Chốt Sổ Ngày ${state.day} — ${state.companyName}`, `
+    openModal(`📊 Chốt Sổ Ngày ${state.day} — ${escapeHtml(state.companyName)}`, `
       <div style="background:#FAF6F0;border:0.12cqw solid #DFD2C1;border-radius:1.1cqw;padding:1cqw;display:flex;flex-direction:column;gap:0.5cqw;">
         <div style="display:flex;justify-content:space-between;"><span>Doanh thu chốt đơn hôm nay <em style="color:#7C6350;font-size:0.92em;">(đã cộng vào quỹ trong ngày)</em></span><strong style="color:#059669;">+${FIN.fmtMoney(state.dayRevenue)}</strong></div>
         ${dividend > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Cổ tức Chi nhánh toàn cầu</span><strong style="color:#059669;">+${FIN.fmtMoney(dividend)}</strong></div>` : ''}
@@ -1667,6 +1728,7 @@ window.STARUP_ENGINE = (() => {
           <span style="color:${state.money >= 0 ? '#059669' : '#DC2626'};">${FIN.fmtMoney(state.money)}</span>
         </div>
       </div>
+      <div style="margin-top:0.55cqw;padding:0.45cqw 0.85cqw;border-radius:0.8cqw;background:#F8FAFC;border:0.1cqw solid #E2E8F0;color:#475569;font-size:0.98cqw;font-weight:700;">📊 Thống kê hôm nay: Đã nhận <strong>${state.dayAcceptedCount || 0}</strong> đơn · Hết hạn <strong>${state.dayExpiredCount || 0}</strong> đơn</div>
       ${keptJobsCount > 0 ? `<div style="margin-top:0.65cqw;padding:0.55cqw 0.85cqw;border-radius:0.85cqw;background:#EFF6FF;color:#1E40AF;font-weight:700;font-size:1.05cqw;">📋 Có ${keptJobsCount} hợp đồng đang làm dở được giữ nguyên sang Ngày ${state.day + 1}.</div>` : ''}
       ${state.money < 0 ? `<div style="margin-top:0.75cqw;padding:0.7cqw;border-radius:0.9cqw;background:#FEF2F2;color:#B91C1C;font-weight:800;line-height:1.4;">⚠️ CẢNH BÁO NỢ (${state.debtDays}/2 NGÀY CHỐT SỔ): Ngày âm quỹ được tính theo số dư <u>tại thời điểm chốt sổ cuối ngày</u> (dù trong ngày có lúc dương trở lại). Âm 2 kỳ chốt sổ liên tiếp sẽ phá sản — hãy bán cổ phiếu, rút tiết kiệm hoặc chạy đơn gấp ngày mai!</div>` : ''}
       <div style="display:flex;gap:0.75cqw;margin-top:1cqw;">
@@ -1684,10 +1746,10 @@ window.STARUP_ENGINE = (() => {
     openModal('💥 Tuyên Bố Phá Sản — Kết Thúc', `
       <div style="text-align:center;padding:0.6cqw 0;">
         <div style="font-size:2.8cqw;">🏦</div>
-        <div style="font-size:1.48cqw;font-weight:900;color:#DC2626;margin-top:0.25cqw;">${state.companyName} đã phá sản (${state.money < -3000 ? 'nợ vượt quá -$3,000' : 'số dư lúc chốt sổ cuối ngày âm 2 ngày liên tiếp'})!</div>
+        <div style="font-size:1.48cqw;font-weight:900;color:#DC2626;margin-top:0.25cqw;">${escapeHtml(state.companyName)} đã phá sản (${state.money < -3000 ? 'nợ vượt quá -$3,000' : 'số dư lúc chốt sổ cuối ngày âm 2 ngày liên tiếp'})!</div>
         <p style="font-size:1.05cqw;color:#6B5443;margin:0.35cqw 0 0.85cqw 0;">Ngân hàng đã niêm phong văn phòng. Bạn có thể xem lại thành tích hành trình hoặc bắt đầu khởi nghiệp lại từ Ngày 1.</p>
         <div style="background:#FAF6F0;border-radius:1.1cqw;padding:0.95cqw;border:0.12cqw solid #DFD2C1;text-align:left;margin-bottom:1cqw;">
-          <div>CEO: <strong>${state.ceoName}</strong> · Trụ vững: <strong>${state.day} ngày</strong></div>
+          <div>CEO: <strong>${escapeHtml(state.ceoName)}</strong> · Trụ vững: <strong>${state.day} ngày</strong></div>
           <div>Hợp đồng hoàn thành: <strong>${state.contractsDone} đơn</strong> · Đỉnh tài sản: <strong>${FIN.fmtMoney(state.peakNetWorth)}</strong> · Thị phần: <strong>${sharePct}%</strong></div>
         </div>
         <div style="display:flex;gap:0.7cqw;">
@@ -1714,6 +1776,8 @@ window.STARUP_ENGINE = (() => {
     state.day += 1;
     state.minutes = 474;
     state.dayRevenue = 0;
+    state.dayAcceptedCount = 0;
+    state.dayExpiredCount = 0;
     state.dayPenalty = 0;
     state.dailyCompletedJobs = [];
     state.dailyQuests = QST.generateDailyQuests(state.day);
@@ -1921,7 +1985,7 @@ window.STARUP_ENGINE = (() => {
           });
         }
         AUD.playSFX('unlock'); autoSave(); renderHUD(); openIPOModal('ipo');
-        showToast(`${TICK_SVG}${state.companyName} [${tickerGuess}] IPO thành công (+${FIN.fmtMoney(ipoCash)})!`);
+        showToast(`${TICK_SVG}${escapeHtml(state.companyName)} [${tickerGuess}] IPO thành công (+${FIN.fmtMoney(ipoCash)})!`);
       };
     }
 
@@ -1947,69 +2011,194 @@ window.STARUP_ENGINE = (() => {
     });
   }
 
-  function openSettingsModal() {
+  function openSettingsModal(tab = activeSettingsTab) {
+    activeSettingsTab = (tab === 'profile') ? 'profile' : 'general';
     const code = encodeSaveCode(state);
-    openModal('⚙️ Cài Đặt & Mã Khôi Phục', `
-      <div style="display:flex;gap:0.8cqw;margin-bottom:1.1cqw;">
-        <button id="btnToggleBGM" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:${AUD.isBGMEnabled() ? '#059669' : '#E7DFD5'};color:${AUD.isBGMEnabled() ? '#fff' : '#4A3426'};font-weight:800;border:none;cursor:pointer;">
-          🎵 Nhạc nền Chill: ${AUD.isBGMEnabled() ? 'BẬT' : 'TẮT'}
-        </button>
-        <button id="btnToggleSFX" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:${AUD.isSFXEnabled() ? '#D97706' : '#E7DFD5'};color:${AUD.isSFXEnabled() ? '#fff' : '#4A3426'};font-weight:800;border:none;cursor:pointer;">
-          🔔 Hiệu ứng: ${AUD.isSFXEnabled() ? 'BẬT' : 'TẮT'}
-        </button>
+    const tabsBar = `
+      <div style="display:flex;gap:0.55cqw;margin-bottom:0.95cqw;">
+        <button data-set-tab="general" type="button" style="flex:1;padding:0.65cqw;border-radius:0.9cqw;font-size:1.08cqw;font-weight:800;border:none;cursor:pointer;${activeSettingsTab === 'general' ? 'background:#4A3426;color:#FFFDF9;' : 'background:#EFE6DA;color:#5C4636;'}">⚙️ Cài Đặt & Mã Lưu</button>
+        <button data-set-tab="profile" type="button" style="flex:1;padding:0.65cqw;border-radius:0.9cqw;font-size:1.08cqw;font-weight:800;border:none;cursor:pointer;${activeSettingsTab === 'profile' ? 'background:#4A3426;color:#FFFDF9;' : 'background:#EFE6DA;color:#5C4636;'}">👤 Hồ Sơ</button>
       </div>
-      <div style="padding:1cqw;border-radius:1.1cqw;background:#FAF6F0;border:0.12cqw solid #D8C7B2;">
-        <div style="font-weight:900;color:#3D2B1F;margin-bottom:0.35cqw;">💾 Tự Lưu & Mã Khôi Phục Tài Khoản</div>
-        <p style="font-size:1.05cqw;color:#6B5443;margin:0 0 0.7cqw 0;line-height:1.4;">
-          <strong>1. Sao lưu:</strong> Game tự lưu trên máy này. Bấm <em>Sao chép</em> cất vào Ghi chú/Zalo để chuyển máy.<br/>
-          <strong>2. Khôi phục:</strong> Dán mã <code>STARUP-...</code> vào ô dưới rồi bấm <em>Khôi phục</em>.
-        </p>
-        <div style="display:flex;gap:0.5cqw;margin-bottom:0.75cqw;">
-          <div style="flex:1;display:flex;flex-direction:column;gap:0.25cqw;"><textarea id="saveCodeOut" readonly rows="2" style="width:100%;padding:0.5cqw 0.75cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-family:monospace;font-size:0.92cqw;background:#FFFDF9;color:#4A3426;resize:none;word-break:break-all;">${code}</textarea><span style="font-size:0.92cqw;color:#047857;font-weight:800;">Độ dài mã: ${code.length} ký tự (rút gọn an toàn)</span></div>
-          <button id="btnCopyCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">📋 Sao chép</button>
-        </div>
-        <div style="display:flex;gap:0.5cqw;">
-          <textarea id="saveCodeIn" rows="2" placeholder="Dán mã STARUP-... vào đây" style="flex:1;padding:0.5cqw 0.75cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-size:0.98cqw;background:#FFFDF9;resize:none;word-break:break-all;"></textarea>
-          <button id="btnRestoreCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">Khôi phục</button>
-        </div>
-      </div>
-      <div style="margin-top:0.85cqw;padding:0.8cqw 1cqw;border-radius:1cqw;background:#ECFDF5;border:0.12cqw solid #86EFAC;display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
-        <div style="font-size:1.02cqw;color:#065F46;font-weight:700;">
-          📲 <strong>Cài làm App (PWA Offline):</strong> ${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'Đang chạy ở chế độ App toàn màn hình!' : 'Cài ra màn hình chính để chơi toàn màn hình không cần mạng.'}
-        </div>
-        <button id="btnInstallPWASettings" type="button" ${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'disabled' : ''} style="padding:0.55cqw 1cqw;border-radius:0.85cqw;background:${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? '#94A3B8' : '#059669'};color:#fff;font-weight:800;border:none;cursor:${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'default' : 'pointer'};white-space:nowrap;">
-          ${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'Đã cài App' : '📲 Cài làm App'}
-        </button>
-      </div>
-    `);
-    const btnInst = document.getElementById('btnInstallPWASettings');
-    if (btnInst && window.STARUP_PWA && !window.STARUP_PWA.isStandalone()) {
-      btnInst.onclick = () => {
-        if (window.STARUP_PWA.canInstall()) {
-          window.STARUP_PWA.promptInstall((res) => {
-            if (res === 'accepted') showToast(`${TICK_SVG}Đang cài đặt App STARUP ra màn hình chính!`);
-          });
-        } else {
-          openModal('📲 Hướng Dẫn Cài Đặt App STARUP', `
-            <div style="display:flex;flex-direction:column;gap:0.75cqw;color:#4A3426;line-height:1.45;">
-              <div><strong>Android (Chrome):</strong> Bấm biểu tượng <strong>⋮ (3 chấm)</strong> góc trên phải trình duyệt → chọn <strong>Cài đặt ứng dụng</strong> (hoặc <em>Thêm vào Màn hình chính</em>).</div>
-              <div><strong>iPhone / iPad (Safari):</strong> Bấm nút <strong>Chia sẻ (↑)</strong> ở thanh đáy → cuộn xuống chọn <strong>Thêm vào Màn hình chính</strong> → bấm <strong>Thêm</strong>.</div>
-              <div style="font-size:1.05cqw;color:#047857;font-weight:700;">Sau khi cài, STARUP sẽ mở toàn màn hình ngang và chơi được cả khi tắt mạng!</div>
+    `;
+
+    let tabBody = '';
+    if (activeSettingsTab === 'profile') {
+      tabBody = `
+        <div style="padding:1.1cqw;border-radius:1.15cqw;background:#FAF6F0;border:0.12cqw solid #D8C7B2;">
+          <div style="display:flex;align-items:center;gap:1.1cqw;margin-bottom:1cqw;">
+            <div style="width:5.4cqw;height:5.4cqw;border-radius:999px;border:0.22cqw solid #D97706;background:#F4ECE0;overflow:hidden;flex-shrink:0;padding:0.2cqw;">
+              ${AVA.renderTokenImg(state.ceoAvatar || 'ceo', escapeHtml(state.ceoName))}
             </div>
-          `);
+            <div style="min-width:0;">
+              <div style="font-size:1.25cqw;font-weight:900;color:#3D2B1F;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(state.companyName)}${state.ipoDone ? ' [' + escapeHtml(state.ticker) + ']' : ''}</div>
+              <div style="font-size:1.02cqw;color:#6B5443;font-weight:700;">CEO: ${escapeHtml(state.ceoName)} · Ngày ${state.day}</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0.75cqw;">
+            <div>
+              <label for="profCompName" style="display:block;font-size:1.0cqw;font-weight:800;color:#5C4636;margin-bottom:0.3cqw;">Tên công ty (1–24 ký tự)</label>
+              <input id="profCompName" type="text" maxlength="24" value="${escapeHtml(state.companyName)}" placeholder="Nhập tên công ty..." style="width:100%;padding:0.65cqw 0.85cqw;border-radius:0.85cqw;border:0.13cqw solid #D8C7B2;background:#FFFDF9;color:#3D2B1F;font-size:1.08cqw;font-weight:700;box-sizing:border-box;" />
+            </div>
+            <div>
+              <label for="profCeoName" style="display:block;font-size:1.0cqw;font-weight:800;color:#5C4636;margin-bottom:0.3cqw;">Tên người chơi / CEO (1–24 ký tự)</label>
+              <input id="profCeoName" type="text" maxlength="24" value="${escapeHtml(state.ceoName)}" placeholder="Nhập tên CEO..." style="width:100%;padding:0.65cqw 0.85cqw;border-radius:0.85cqw;border:0.13cqw solid #D8C7B2;background:#FFFDF9;color:#3D2B1F;font-size:1.08cqw;font-weight:700;box-sizing:border-box;" />
+            </div>
+            <div id="profStatus" style="font-size:0.96cqw;font-weight:800;min-height:1.25cqw;"></div>
+            <button id="btnSaveProfile" type="button" style="width:100%;padding:0.82cqw;border-radius:0.95cqw;background:#059669;color:#fff;font-size:1.12cqw;font-weight:900;border:none;cursor:pointer;">💾 Lưu hồ sơ</button>
+          </div>
+        </div>
+      `;
+    } else {
+      tabBody = `
+        <div style="display:flex;gap:0.8cqw;margin-bottom:1.1cqw;">
+          <button id="btnToggleBGM" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:${AUD.isBGMEnabled() ? '#059669' : '#E7DFD5'};color:${AUD.isBGMEnabled() ? '#fff' : '#4A3426'};font-weight:800;border:none;cursor:pointer;">
+            🎵 Nhạc nền Chill: ${AUD.isBGMEnabled() ? 'BẬT' : 'TẮT'}
+          </button>
+          <button id="btnToggleSFX" type="button" style="flex:1;padding:0.85cqw;border-radius:1cqw;background:${AUD.isSFXEnabled() ? '#D97706' : '#E7DFD5'};color:${AUD.isSFXEnabled() ? '#fff' : '#4A3426'};font-weight:800;border:none;cursor:pointer;">
+            🔔 Hiệu ứng: ${AUD.isSFXEnabled() ? 'BẬT' : 'TẮT'}
+          </button>
+        </div>
+        <div style="margin-bottom:0.95cqw;padding:0.7cqw 0.95cqw;border-radius:1cqw;background:${state.relaxedMode ? '#ECFDF5' : '#FAF6F0'};border:0.12cqw solid ${state.relaxedMode ? '#6EE7B7' : '#DFD2C1'};display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
+          <div style="font-size:1.0cqw;color:#3D2B1F;line-height:1.35;">
+            <strong>🌿 Chế độ Thư giãn</strong> <span style="color:#6B5443;">(Kiên nhẫn đơn chờ ×2 · Phạt hết hạn −1 ★)</span>
+          </div>
+          <button id="btnToggleRelaxed" type="button" style="padding:0.5cqw 0.95cqw;border-radius:0.85cqw;background:${state.relaxedMode ? '#059669' : '#D6CCC0'};color:${state.relaxedMode ? '#fff' : '#4A3426'};font-weight:800;border:none;cursor:pointer;white-space:nowrap;">
+            ${state.relaxedMode ? 'ĐANG BẬT' : 'TẮT'}
+          </button>
+        </div>
+        <div style="padding:1cqw;border-radius:1.1cqw;background:#FAF6F0;border:0.12cqw solid #D8C7B2;">
+          <div style="font-weight:900;color:#3D2B1F;margin-bottom:0.35cqw;">💾 Tự Lưu & Mã Khôi Phục Tài Khoản</div>
+          <p style="font-size:1.05cqw;color:#6B5443;margin:0 0 0.7cqw 0;line-height:1.4;">
+            <strong>1. Sao lưu:</strong> Game tự lưu trên máy này. Bấm <em>Sao chép</em> cất vào Ghi chú/Zalo để chuyển máy.<br/>
+            <strong>2. Khôi phục:</strong> Dán mã <code>STARUP2-...</code> vào ô dưới rồi bấm <em>Khôi phục</em>.
+          </p>
+          <div style="display:flex;gap:0.5cqw;margin-bottom:0.75cqw;">
+            <div style="flex:1;display:flex;flex-direction:column;gap:0.25cqw;"><textarea id="saveCodeOut" readonly rows="2" style="width:100%;padding:0.5cqw 0.75cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-family:monospace;font-size:0.92cqw;background:#FFFDF9;color:#4A3426;resize:none;word-break:break-all;">${code}</textarea><span style="font-size:0.92cqw;color:#047857;font-weight:800;">Độ dài mã: ${code.length} ký tự (rút gọn an toàn)</span></div>
+            <button id="btnCopyCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">📋 Sao chép</button>
+          </div>
+          <div style="display:flex;gap:0.5cqw;">
+            <textarea id="saveCodeIn" rows="2" placeholder="Dán mã STARUP2-... vào đây" style="flex:1;padding:0.5cqw 0.75cqw;border-radius:0.8cqw;border:0.12cqw solid #D8C7B2;font-size:0.98cqw;background:#FFFDF9;resize:none;word-break:break-all;"></textarea>
+            <button id="btnRestoreCode" type="button" style="padding:0.55cqw 1cqw;border-radius:0.8cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">Khôi phục</button>
+          </div>
+          <div id="saveCodeStatus" style="margin-top:0.35cqw;font-size:0.94cqw;font-weight:800;min-height:1.25cqw;"></div>
+        </div>
+        <div style="margin-top:0.85cqw;padding:0.8cqw 1cqw;border-radius:1cqw;background:#ECFDF5;border:0.12cqw solid #86EFAC;display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
+          <div style="font-size:1.02cqw;color:#065F46;font-weight:700;">
+            📲 <strong>Cài làm App (PWA Offline):</strong> ${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'Đang chạy ở chế độ App toàn màn hình!' : 'Cài ra màn hình chính để chơi toàn màn hình không cần mạng.'}
+          </div>
+          <button id="btnInstallPWASettings" type="button" ${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'disabled' : ''} style="padding:0.55cqw 1cqw;border-radius:0.85cqw;background:${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? '#94A3B8' : '#059669'};color:#fff;font-weight:800;border:none;cursor:${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'default' : 'pointer'};white-space:nowrap;">
+            ${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'Đã cài App' : '📲 Cài làm App'}
+          </button>
+        </div>
+      `;
+    }
+
+    openModal('⚙️ Cài Đặt & Hồ Sơ', tabsBar + tabBody);
+
+    document.querySelectorAll('[data-set-tab]').forEach(b => {
+      b.onclick = () => { AUD.playSFX('click'); openSettingsModal(b.dataset.setTab); };
+    });
+
+    if (activeSettingsTab === 'profile') {
+      const inpComp = document.getElementById('profCompName');
+      const inpCeo = document.getElementById('profCeoName');
+      const statEl = document.getElementById('profStatus');
+      const btnSave = document.getElementById('btnSaveProfile');
+      const handleSaveProfile = (e) => {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
+        const newComp = (inpComp.value || '').trim();
+        const newCeo = (inpCeo.value || '').trim();
+        if (!newComp || newComp.length > 24) {
+          statEl.style.color = '#DC2626';
+          statEl.textContent = '❌ Tên công ty phải dài từ 1 đến 24 ký tự (không được để trống).';
+          return;
+        }
+        if (!newCeo || newCeo.length > 24) {
+          statEl.style.color = '#DC2626';
+          statEl.textContent = '❌ Tên người chơi (CEO) phải dài từ 1 đến 24 ký tự (không được để trống).';
+          return;
+        }
+        state.companyName = newComp;
+        state.ceoName = newCeo;
+        // Sync own stock display name if IPO already done
+        if (Array.isArray(state.stocks)) {
+          const ownSt = state.stocks.find(x => x.isOwn);
+          if (ownSt) ownSt.name = newComp + ' (Của bạn)';
+        }
+        // Sync welcome news item if present
+        if (Array.isArray(state.newsList)) {
+          state.newsList = state.newsList.map(it =>
+            (it && typeof it.text === 'string' && it.text.startsWith('Chào mừng CEO '))
+              ? { day: it.day, text: `Chào mừng CEO ${escapeHtml(newCeo)} trở lại điều hành ${escapeHtml(newComp)} (Ngày ${it.day})!` }
+              : it
+          );
+        }
+        AUD.playSFX('unlock');
+        autoSave();
+        renderHUD();
+        showToast(`${TICK_SVG}Đã cập nhật hồ sơ: ${escapeHtml(newComp)} · CEO ${escapeHtml(newCeo)}!`);
+        openSettingsModal('profile');
+        const stAfter = document.getElementById('profStatus');
+        if (stAfter) {
+          stAfter.style.color = '#059669';
+          stAfter.textContent = '✓ Đã lưu hồ sơ và cập nhật toàn bộ giao diện!';
+        }
+      };
+      btnSave.addEventListener('pointerdown', handleSaveProfile);
+      btnSave.onclick = handleSaveProfile;
+      return;
+    }
+
+    const btnInstSet = document.getElementById('btnInstallPWASettings');
+    if (btnInstSet && !btnInstSet.disabled) {
+      btnInstSet.onclick = async () => {
+        if (window.STARUP_PWA) {
+          const r = await window.STARUP_PWA.promptInstall();
+          if (r === 'accepted') showToast(`${TICK_SVG}Đã cài đặt STARUP lên màn hình chính!`);
+          else if (r === 'ios' || r === 'manual') openPWAHelpModal(r === 'ios');
         }
       };
     }
-    document.getElementById('btnToggleBGM').onclick = () => { AUD.setBGM(!AUD.isBGMEnabled()); openSettingsModal(); };
-    document.getElementById('btnToggleSFX').onclick = () => { AUD.setSFX(!AUD.isSFXEnabled()); openSettingsModal(); };
-    document.getElementById('btnCopyCode').onclick = () => {
+    document.getElementById('btnToggleBGM').onclick = () => { AUD.setBGM(!AUD.isBGMEnabled()); openSettingsModal('general'); };
+    document.getElementById('btnToggleSFX').onclick = () => { AUD.setSFX(!AUD.isSFXEnabled()); openSettingsModal('general'); };
+    const btnRelax = document.getElementById('btnToggleRelaxed');
+    if (btnRelax) {
+      btnRelax.onclick = () => {
+        state.relaxedMode = !state.relaxedMode;
+        autoSave();
+        showToast(state.relaxedMode ? '🌿 Đã BẬT Chế độ Thư giãn (kiên nhẫn đơn chờ ×2)!' : 'Chế độ Thư giãn đã TẮT.');
+        openSettingsModal('general');
+      };
+    }
+    const saveCodeInEl = document.getElementById('saveCodeIn');
+    const saveCodeStatusEl = document.getElementById('saveCodeStatus');
+    if (saveCodeInEl && saveCodeStatusEl) {
+      const validateLive = () => {
+        const val = saveCodeInEl.value.trim();
+        if (!val) { saveCodeStatusEl.textContent = ''; return; }
+        const res = decodeSaveCodeWithReason(val);
+        if (res.data) {
+          saveCodeStatusEl.style.color = '#059669';
+          saveCodeStatusEl.textContent = `✓ Mã hợp lệ — ${res.data.companyName} (Ngày ${res.data.day} · ${FIN.fmtMoney(res.data.money)} · ${res.data.stars} ★)`;
+        } else {
+          saveCodeStatusEl.style.color = '#DC2626';
+          saveCodeStatusEl.textContent = '❌ ' + res.error;
+        }
+      };
+      saveCodeInEl.addEventListener('input', validateLive);
+    }
+    const btnCopyEl = document.getElementById('btnCopyCode');
+    btnCopyEl.onclick = () => {
       const inp = document.getElementById('saveCodeOut');
       inp.select();
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(inp.value).catch(() => document.execCommand('copy'));
         else document.execCommand('copy');
       } catch (e) {}
-      showToast(`${TICK_SVG}Đã sao chép mã khôi phục!`);
+      btnCopyEl.textContent = '✓ Đã chép';
+      setTimeout(() => { if (btnCopyEl) btnCopyEl.textContent = '📋 Sao chép'; }, 1800);
+      showToast(`${TICK_SVG}Đã sao chép mã khôi phục (${inp.value.length} ký tự)!`);
     };
     const btnRestoreSettingsEl = document.getElementById('btnRestoreCode');
     let restoreBusy = false;
@@ -2033,7 +2222,7 @@ window.STARUP_ENGINE = (() => {
         if (state.pendingEvent && state.pendingEvent.kind && !state.dailyClosed && !state.isBankrupt) {
           showRandomEventModal(state.pendingEvent.kind, state.pendingEvent.roomId, true);
         }
-        showToast(`${TICK_SVG}Đã khôi phục ${state.companyName} — Ngày ${state.day} (tạm dừng)!`);
+        showToast(`${TICK_SVG}Đã khôi phục ${escapeHtml(state.companyName)} — Ngày ${state.day} (tạm dừng)!`);
       } catch (err) {
         console.error('Settings restore error:', err);
         showToast('❌ Lỗi khi khôi phục dữ liệu: ' + (err && err.message ? err.message : 'không xác định'));
@@ -2050,10 +2239,19 @@ window.STARUP_ENGINE = (() => {
     document.getElementById('hudMoney').textContent = fmtHudMoney(state.money);
     document.getElementById('hudMoney').style.color = state.money < 0 ? '#DC2626' : '#3D2B1F';
     document.getElementById('hudStars').textContent = state.stars;
-    document.getElementById('hudCompanyTag').textContent = state.ipoDone ? `[${state.ticker}]` : state.companyName;
+    document.getElementById('hudCompanyTag').textContent = state.ipoDone ? `[${state.ticker}] ${state.companyName}` : state.companyName;
     document.getElementById('clockIcon').textContent = phase.icon;
     const sea = EMP.getSeason(state.day);
     document.getElementById('clockText').textContent = `${sea.icon} N${state.day} · ${fmtTime(state.minutes)}`;
+    const psHud = document.getElementById('btnPause');
+    const spHud = document.getElementById('btnSpeed');
+    if (state.speed > 0) lastPlaySpeed = state.speed;
+    if (psHud) {
+      psHud.textContent = state.speed === 0 ? '▶' : '⏸';
+      psHud.style.background = state.speed === 0 ? '#DC2626' : '';
+      psHud.style.color = state.speed === 0 ? '#FFFDF9' : '';
+    }
+    if (spHud) spHud.textContent = (state.speed === 0 ? (lastPlaySpeed || 1) : state.speed) + 'x';
 
     // Ultra-smooth continuous Sunset -> Dusk -> Night transition (15:00 -> 17:30)
     const m = state.minutes;
@@ -2251,25 +2449,26 @@ window.STARUP_ENGINE = (() => {
           let lastPenalizedWho = '';
           expired.forEach(c => {
             const targetBusy = !!(state.rooms[c.roomId] && state.rooms[c.roomId].job) || state.disabledRoomId === c.roomId;
+            state.dayExpiredCount = (state.dayExpiredCount || 0) + 1;
             if (targetBusy) {
               showToast(`👋 Khách (${c.roomName} đang bận) đã rời đi — không bị trừ ★`);
             } else {
-              state.stars = Math.max(0, state.stars - 2);
-              state.morale = Math.max(20, state.morale - 4);
+              state.stars = Math.max(0, state.stars - 1);
+              state.morale = Math.max(20, state.morale - 3);
               AUD.playSFX('alert');
               const who = c.isVIP ? 'Khách VIP' : 'Khách hàng';
               penalizedExpiredCount += 1;
               lastPenalizedWho = `${who} (${c.roomName})`;
-              addNews(`[${fmtTime(state.minutes)}] 😤 ${who} (${c.roomName} · ${FIN.fmtMoney(c.reward)}) rời sảnh do hết giờ chờ: −2 ★`);
+              addNews(`[${fmtTime(state.minutes)}] 😤 ${who} (${c.roomName} · ${FIN.fmtMoney(c.reward)}) rời sảnh do hết giờ chờ: −1 ★`);
             }
             dismissClient(c.id, false);
             autoSave();
             renderHUD();
           });
           if (penalizedExpiredCount === 1) {
-            showToast(`😤 ${lastPenalizedWho} đã rời đi: −2 ★`);
+            showToast(`😤 ${lastPenalizedWho} đã rời đi: −1 ★`);
           } else if (penalizedExpiredCount > 1) {
-            showToast(`😤 ${penalizedExpiredCount} khách hàng rời sảnh vì hết giờ chờ: −${penalizedExpiredCount * 2} ★`);
+            showToast(`😤 ${penalizedExpiredCount} khách hàng rời sảnh vì hết giờ chờ: −${penalizedExpiredCount} ★`);
           }
         }
 
@@ -2317,6 +2516,9 @@ window.STARUP_ENGINE = (() => {
                 showToast(`🎖️ Quản lý ${rc.name} đã tự động ${issueKind === 'server' ? 'sửa Server' : 'pha cà phê'} ở 50% — tiến độ chạy tiếp!`);
               } else {
                 rs.job.issue = issueKind;
+                if (!state.roomStats) state.roomStats = {};
+                if (!state.roomStats[rc.id]) state.roomStats[rc.id] = [0, 0];
+                state.roomStats[rc.id][0] = (state.roomStats[rc.id][0] || 0) + 1;
                 AUD.playSFX('alert');
                 overlayDirty = true;
                 if (rs.job.issue === 'server') {
@@ -2468,9 +2670,26 @@ window.STARUP_ENGINE = (() => {
     document.getElementById('btnIntroRestore').onclick = () => {
       openModal('🔑 Khôi Phục Tiến Độ Bằng Mã', `
         <p style="color:#6B5443;margin:0 0 0.8cqw 0;">Dán mã <code>STARUP-...</code> bạn đã sao lưu vào ô dưới đây:</p>
-        <textarea id="introCodeInp" rows="3" placeholder="Dán mã STARUP-... vào đây" style="width:100%;padding:0.7cqw;border-radius:0.9cqw;border:0.14cqw solid #D8C7B2;font-size:1.05cqw;margin-bottom:0.9cqw;resize:none;word-break:break-all;"></textarea>
+        <textarea id="introCodeInp" rows="3" placeholder="Dán mã STARUP2-... vào đây" style="width:100%;padding:0.7cqw;border-radius:0.9cqw;border:0.14cqw solid #D8C7B2;font-size:1.05cqw;margin-bottom:0.45cqw;resize:none;word-break:break-all;"></textarea>
+        <div id="introCodeStatus" style="margin-bottom:0.65cqw;font-size:0.96cqw;font-weight:800;min-height:1.25cqw;"></div>
         <button id="btnConfirmIntroRestore" type="button" style="width:100%;padding:0.85cqw;border-radius:0.95cqw;background:#059669;color:#fff;font-weight:800;border:none;cursor:pointer;">Khôi phục & Vào Game</button>
       `);
+      const introInpEl = document.getElementById('introCodeInp');
+      const introStatEl = document.getElementById('introCodeStatus');
+      if (introInpEl && introStatEl) {
+        introInpEl.addEventListener('input', () => {
+          const val = introInpEl.value.trim();
+          if (!val) { introStatEl.textContent = ''; return; }
+          const res = decodeSaveCodeWithReason(val);
+          if (res.data) {
+            introStatEl.style.color = '#059669';
+            introStatEl.textContent = `✓ Mã hợp lệ — ${res.data.companyName} (Ngày ${res.data.day} · ${FIN.fmtMoney(res.data.money)} · ${res.data.stars} ★)`;
+          } else {
+            introStatEl.style.color = '#DC2626';
+            introStatEl.textContent = '❌ ' + res.error;
+          }
+        });
+      }
       const btnConfirmIntroEl = document.getElementById('btnConfirmIntroRestore');
       let introRestoreBusy = false;
       const handleIntroRestore = (e) => {
@@ -2548,7 +2767,7 @@ window.STARUP_ENGINE = (() => {
     autoSave();
     if (isNew) {
       clientSpawnCooldown = 2.5;
-      showToast(`🎉 Chào mừng CEO ${state.ceoName} đến với ${state.companyName}!`);
+      showToast(`🎉 Chào mừng CEO ${escapeHtml(state.ceoName)} đến với ${escapeHtml(state.companyName)}!`);
     } else {
       // Lỗi N1 Rescue: If loaded save was stuck near/past closing time (e.g. 17:55 overtime), smoothly finish & open End-of-Day report!
       const closeMin = state.overtimeActive ? 1080 : 1020;
@@ -2598,10 +2817,43 @@ window.STARUP_ENGINE = (() => {
     });
     document.getElementById('btnCloseDrawer').onclick = () => { state.selectedRoom = null; renderMapOverlays(); renderDrawer(); };
     document.getElementById('btnSkipTutorial').onclick = () => { if (state) { state.tutorialStep = 0; renderTutorial(); autoSave(); } };
+    function syncSpeedButtons() {
+      const spEl = document.getElementById('btnSpeed');
+      const psEl = document.getElementById('btnPause');
+      if (!state) return;
+      if (state.speed > 0) lastPlaySpeed = state.speed;
+      if (spEl) spEl.textContent = (state.speed === 0 ? lastPlaySpeed : state.speed) + 'x';
+      if (psEl) {
+        psEl.textContent = state.speed === 0 ? '▶' : '⏸';
+        psEl.style.background = state.speed === 0 ? '#DC2626' : '';
+        psEl.style.color = state.speed === 0 ? '#FFFDF9' : '';
+      }
+    }
+    const btnPauseEl = document.getElementById('btnPause');
+    if (btnPauseEl) {
+      btnPauseEl.onclick = () => {
+        if (!state) return;
+        if (state.speed === 0) {
+          state.speed = lastPlaySpeed || 1;
+        } else {
+          lastPlaySpeed = state.speed;
+          state.speed = 0;
+        }
+        syncSpeedButtons();
+        AUD.playSFX('click');
+        renderMapOverlays(true);
+        autoSave();
+      };
+    }
     document.getElementById('btnSpeed').onclick = () => {
       if (!state) return;
-      state.speed = state.speed === 1 ? 2 : (state.speed === 2 ? 3 : (state.speed === 3 ? 0 : 1));
-      document.getElementById('btnSpeed').textContent = state.speed === 0 ? '⏸' : state.speed + 'x';
+      if (state.speed === 0) {
+        state.speed = lastPlaySpeed || 1;
+      } else {
+        state.speed = state.speed === 1 ? 2 : (state.speed === 2 ? 3 : 1);
+        lastPlaySpeed = state.speed;
+      }
+      syncSpeedButtons();
       AUD.playSFX('click');
       renderMapOverlays(true);
       autoSave();
@@ -2611,7 +2863,20 @@ window.STARUP_ENGINE = (() => {
       state.unreadNews = false;
       renderHUD();
       const list = (state.newsList && state.newsList.length) ? state.newsList : [{ day: state.day, text: state.newsHint }];
+      const upcomingHints = [];
+      if (state.day >= 2) {
+        if ((state.day - (state.lastStaffSickDay !== undefined ? state.lastStaffSickDay : -10)) >= 5) upcomingHints.push('🤒 Nhân sự có thể xin nghỉ ốm');
+        if ((state.day - (state.lastPowerOutageDay !== undefined ? state.lastPowerOutageDay : -10)) >= 5) upcomingHints.push('⚡ Kiểm tra đường dây điện');
+        if ((state.day - (state.lastTaxAuditDay !== undefined ? state.lastTaxAuditDay : -10)) >= 2) upcomingHints.push('🧾 Thanh tra thuế & sổ sách');
+        if ((state.day - (state.lastMacroWaveDay !== undefined ? state.lastMacroWaveDay : -10)) >= 3) upcomingHints.push('📉 Thị trường có thể rung lắc');
+        if ((state.day - (state.lastIndustryBoomDay !== undefined ? state.lastIndustryBoomDay : -10)) >= 2) upcomingHints.push('🚀 Làn sóng khách hàng mới');
+        if ((state.day - (state.lastPartnerPromoDay !== undefined ? state.lastPartnerPromoDay : -10)) >= 2) upcomingHints.push('🤝 Đối tác đề nghị hợp tác');
+      }
+      const forecastHtml = upcomingHints.length
+        ? `<div style="padding:0.75cqw 1cqw;border-radius:1cqw;background:#EFF6FF;border:0.12cqw solid #BFDBFE;color:#1E40AF;font-size:0.98cqw;line-height:1.4;margin-bottom:0.75cqw;"><strong>🔮 Dự báo biến cố có thể xuất hiện sắp tới:</strong> ${upcomingHints.slice(0, 4).join(' · ')}</div>`
+        : '';
       openModal('📰 Tin Nóng Thị Trường Theo Ngày', `
+        ${forecastHtml}
         <div style="display:flex;flex-direction:column;gap:0.65cqw;">
           ${list.map((item, i) => `
             <div style="padding:0.85cqw 1cqw;border-radius:1cqw;background:${i === 0 ? '#FEF3C7' : '#FAF6F0'};border:0.12cqw solid ${i === 0 ? '#FCD34D' : '#DFD2C1'};color:${i === 0 ? '#92400E' : '#5C4636'};font-weight:${i === 0 ? '800' : '600'};line-height:1.4;">
