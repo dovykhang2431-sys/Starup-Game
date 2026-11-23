@@ -910,7 +910,7 @@ window.STARUP_ENGINE = (() => {
       return `${rc.id}:${rs.unlocked?1:0}:${canBuy}:${down}:${rs.equipLv}:${jState}:${state.selectedRoom===rc.id?1:0}`;
     }).join('|');
     const cSig = waitingClients.filter(c => c.arrived).map(c => `${c.id}:${c.tier}`).join(',');
-    return rSig + '#' + cSig + '#' + (state.tutorialStep === 1 ? 1 : 0);
+    return rSig + '#' + cSig + '#' + (state.tutorialStep === 1 ? 1 : 0) + '#' + (state.speed === 0 ? 1 : 0);
   }
 
   function updateOverlayLiveMetrics() {
@@ -920,8 +920,15 @@ window.STARUP_ENGINE = (() => {
       const pctEl = document.getElementById('prog-txt-' + rc.id);
       const barEl = document.getElementById('prog-bar-' + rc.id);
       const pctInt = Math.min(100, Math.floor(rs.job.progress));
-      if (pctEl) pctEl.textContent = (rs.job.tier === 'rush' ? '⚡ ' : '') + pctInt + '%';
-      if (barEl) barEl.style.width = pctInt + '%';
+      const isGamePaused = state.speed === 0;
+      if (pctEl) {
+        pctEl.textContent = isGamePaused ? ('⏸️ ' + pctInt + '%') : ((rs.job.tier === 'rush' ? '⚡ ' : '') + pctInt + '%');
+        pctEl.style.color = isGamePaused ? '#DC2626' : '#4A3426';
+      }
+      if (barEl) {
+        barEl.style.width = pctInt + '%';
+        barEl.style.background = isGamePaused ? '#F59E0B' : '';
+      }
       if (state.selectedRoom === rc.id) { const dp = document.getElementById('drJobPct'); const db = document.getElementById('drJobBar'); if (dp) dp.textContent = pctInt + '%'; if (db) db.style.width = pctInt + '%'; }
     });
     waitingClients.forEach(c => {
@@ -1068,9 +1075,11 @@ window.STARUP_ENGINE = (() => {
           pill.className = 'work-progress-pill';
           pill.style.left = rc.chipPos.x + '%';
           pill.style.top = (rc.chipPos.y + 5.5) + '%';
+          const isGamePaused = state.speed === 0;
+          const pctNow = Math.min(100, Math.floor(j.progress || 0));
           pill.innerHTML = `
-            <div id="prog-txt-${rc.id}" style="font-size:0.88cqw;font-weight:800;color:#4A3426;text-align:center;">${j.tier === 'rush' ? '⚡ ' : ''}${Math.floor(j.progress)}%</div>
-            <div class="work-progress-bar"><div id="prog-bar-${rc.id}" class="work-progress-fill" style="width:${Math.min(100, Math.floor(j.progress))}%"></div></div>
+            <div id="prog-txt-${rc.id}" style="font-size:0.88cqw;font-weight:800;color:${isGamePaused ? '#DC2626' : '#4A3426'};text-align:center;">${isGamePaused ? '⏸️ ' : (j.tier === 'rush' ? '⚡ ' : '')}${pctNow}%</div>
+            <div class="work-progress-bar"><div id="prog-bar-${rc.id}" class="work-progress-fill" style="width:${pctNow}%;${isGamePaused ? 'background:#F59E0B;' : ''}"></div></div>
           `;
           layer.appendChild(pill);
         }
@@ -1562,7 +1571,7 @@ window.STARUP_ENGINE = (() => {
         ${(flexInt + fixedInt) > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Lãi tiết kiệm ngân hàng</span><strong style="color:#059669;">+${FIN.fmtMoney(flexInt + fixedInt)}</strong></div>` : ''}
         <div style="display:flex;justify-content:space-between;"><span>Thuê mặt bằng & Lương NV ${savedCost > 0 ? `<em style="color:#059669;">(P.Tài Chính giảm ${FIN.fmtMoney(savedCost)})</em>` : ''}</span><strong style="color:#DC2626;">-${FIN.fmtMoney(finalOpCost)}</strong></div>
         ${loanPayment > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Trả góp Ngân hàng</span><strong style="color:#DC2626;">-${FIN.fmtMoney(loanPayment)}</strong></div>` : ''}
-        ${rushPenalty > 0 ? `<div style="display:flex;justify-content:space-between;"><span>⚡ Hủy đơn Hỏa Tốc trễ hạn (−${rushStarsLost} ★)</span><strong style="color:#DC2626;">-${FIN.fmtMoney(rushPenalty)}</strong></div>` : ''}
+        ${rushPenalty > 0 ? `<div style="display:flex;justify-content:space-between;"><span>⚡ Phạt trễ hạn đơn Hỏa Tốc (−${rushStarsLost} ★ · chuyển làm tiếp ngày mai)</span><strong style="color:#DC2626;">-${FIN.fmtMoney(rushPenalty)}</strong></div>` : ''}
         ${investorShare > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🤝 Chia lãi Nhà đầu tư (${state.investorEquity}%)</span><strong style="color:#C2410C;">-${FIN.fmtMoney(investorShare)}</strong></div>` : ''}
         <div style="display:flex;justify-content:space-between;padding-top:0.55cqw;border-top:0.12cqw solid #D8C7B2;font-weight:900;font-size:1.35cqw;">
           <span>Số dư tiền mặt hiện tại</span>
@@ -2172,13 +2181,18 @@ window.STARUP_ENGINE = (() => {
             const baseChance = state.rooms.pantry.unlocked ? 0.16 : 0.30;
             const chance = state.tutorialStep === 2 ? 0.85 : baseChance;
             if (Math.random() < chance) {
-              rs.job.issue = (rc.id === 'tech' && Math.random() < 0.6) ? 'server' : 'coffee';
-              AUD.playSFX('alert');
-              overlayDirty = true;
-              if (rs.job.issue === 'server') {
-                showToast(`🔧 ${rc.name} tạm dừng ở 50% do lỗi Server! Bấm "🔧 Sửa Server!" cạnh phòng để tiếp tục.`);
+              const issueKind = (rc.id === 'tech' && Math.random() < 0.6) ? 'server' : 'coffee';
+              if (rs.hasManager) {
+                showToast(`🎖️ Quản lý ${rc.name} đã tự động ${issueKind === 'server' ? 'sửa Server' : 'pha cà phê'} ở 50% — tiến độ chạy tiếp!`);
               } else {
-                showToast(`☕ ${rc.name} tạm dừng ở 50%! Bấm nút "☕ Pha Cà Phê!" cạnh phòng để gỡ kẹt và tiếp tục.`);
+                rs.job.issue = issueKind;
+                AUD.playSFX('alert');
+                overlayDirty = true;
+                if (rs.job.issue === 'server') {
+                  showToast(`🔧 ${rc.name} tạm dừng ở 50% do lỗi Server! Bấm "🔧 Sửa Server!" cạnh phòng để tiếp tục.`);
+                } else {
+                  showToast(`☕ ${rc.name} tạm dừng ở 50%! Bấm nút "☕ Pha Cà Phê!" cạnh phòng để gỡ kẹt và tiếp tục.`);
+                }
               }
             }
           }
@@ -2382,6 +2396,7 @@ window.STARUP_ENGINE = (() => {
       state.speed = state.speed === 1 ? 2 : (state.speed === 2 ? 3 : (state.speed === 3 ? 0 : 1));
       document.getElementById('btnSpeed').textContent = state.speed === 0 ? '⏸' : state.speed + 'x';
       AUD.playSFX('click');
+      renderMapOverlays(true);
       autoSave();
     };
     document.getElementById('btnNews').onclick = () => {
