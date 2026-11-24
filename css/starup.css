@@ -16,6 +16,10 @@ html, body {
   -webkit-text-size-adjust: 100%;
 }
 
+button, input, select, textarea {
+  font-family: inherit;
+}
+
 #appRoot {
   position: fixed;
   inset: 0;

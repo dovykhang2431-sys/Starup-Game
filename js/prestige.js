@@ -197,7 +197,7 @@ window.STARUP_PRESTIGE = (() => {
     }).join('');
 
     return `
-      <div style="margin-top:0.95cqw;padding-top:0.85cqw;border-top:0.14cqw dashed #D8C7B2;">
+      <div style="margin-top:0.95cqw;padding-top:0.85cqw;border-top:0.14cqw dashed #D8C7B2;font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;">
         ${sellCard}
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.35cqw;">
           <div style="font-weight:900;font-size:1.12cqw;color:#3D2B1F;">🌳 Cây Đặc Quyền Vĩnh Viễn (Cộng dồn qua mọi lần chơi)</div>
