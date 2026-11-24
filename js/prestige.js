@@ -74,7 +74,7 @@ window.STARUP_PRESTIGE = (() => {
   }
 
   function getMaxReachableTier(state) {
-    const p = ensurePrestige(state);
+    const p = state && state.prestige ? state.prestige : createDefaultPrestige();
     const maxT = (CFG.PRESTIGE_CFG && CFG.PRESTIGE_CFG.MAX_TIER) || 3;
     return Math.min(maxT, 1 + (p.unlockedTier || 0));
   }
@@ -264,8 +264,49 @@ window.STARUP_PRESTIGE = (() => {
     `;
   }
 
+
+  function purchasePerk(state, perkId, chosenRoomId = null) {
+    if (!state || !CFG || !CFG.PRESTIGE_CFG) {
+      return { ok: false, error: 'Không thể khởi tạo dữ liệu đặc quyền.' };
+    }
+    const p = ensurePrestige(state);
+    const perkDef = (CFG.PRESTIGE_CFG.PERKS || []).find(x => x.id === perkId);
+    if (!perkDef) {
+      return { ok: false, error: 'Không tìm thấy đặc quyền này!' };
+    }
+    const maxT = CFG.PRESTIGE_CFG.MAX_TIER || 3;
+    const maxTier = Math.min(maxT, 1 + (p.unlockedTier || 0));
+    if (perkDef.tier > maxTier) {
+      return { ok: false, error: `Tầng ${perkDef.tier} chưa được mở khóa — hãy bán công ty thêm để mở tầng!` };
+    }
+    const ownedLv = (p.perks && p.perks[perkId]) || 0;
+    if (ownedLv >= maxTier) {
+      return { ok: false, error: 'Đặc quyền này đã đạt cấp tối đa cho tầng hiện tại!' };
+    }
+    const nextTier = ownedLv + 1;
+    const cost = getPerkCost(perkDef, nextTier);
+    if ((p.points || 0) < cost) {
+      return { ok: false, error: `Cần ${cost} Điểm Di Sản để mua đặc quyền này (hiện có ${p.points || 0} điểm)!` };
+    }
+    if (perkId === 'unlock_room') {
+      if (!chosenRoomId) {
+        return { ok: false, needsRoomChoice: true, cost, nextTier, perkDef };
+      }
+      const validIds = getLockableRooms().map(r => r.id);
+      if (!validIds.includes(chosenRoomId) || p.chosenRooms.includes(chosenRoomId)) {
+        return { ok: false, error: 'Phòng ban đã chọn không hợp lệ hoặc đã được chọn trước đó!' };
+      }
+      p.chosenRooms.push(chosenRoomId);
+    }
+    p.points = Math.max(0, (p.points || 0) - cost);
+    p.perks[perkId] = nextTier;
+    p.activePerks[perkId] = true;
+    state.prestige = p;
+    return { ok: true, perkDef, nextTier, cost, pointsLeft: p.points, chosenRoomId };
+  }
+
   return {
-    createDefaultPrestige, normalizePrestige, ensurePrestige,
+    createDefaultPrestige, normalizePrestige, ensurePrestige, purchasePerk,
     getActiveLevel, getOwnedLevel, getMaxReachableTier, getPerkCost,
     calcSaleValuation, getLockableRooms, getRoomNameById,
     renderPerkIcon, buildPrestigeSectionHTML, buildHallOfFameHTML

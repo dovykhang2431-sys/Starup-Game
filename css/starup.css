@@ -750,7 +750,7 @@ html, body {
   position: absolute;
   top: 6.2cqw;
   right: 1.8cqw;
-  z-index: 68;
+  z-index: 9999;
   max-width: 44cqw;
   padding: 0.5cqw 1.2cqw;
   border-radius: 1.1cqw;

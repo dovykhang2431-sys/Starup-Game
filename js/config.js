@@ -197,7 +197,7 @@ window.STARUP_CONFIG = {
       { id: 'job_speed', tier: 2, baseCost: 9, iconImg: null, emoji: '⚡', name: '+15% Tốc Độ Hoàn Thành Đơn', desc: 'Tăng +15% tốc độ xử lý hợp đồng của toàn bộ phòng ban ở mỗi tầng.' },
       { id: 'fixed_cost', tier: 2, baseCost: 10, iconImg: null, emoji: '🧾', name: 'Giảm 10% Chi Phí Cố Định/Ngày', desc: 'Giảm 10% tiền thuê mặt bằng & lương nhân viên hằng ngày ở mỗi tầng.' },
       { id: 'morale_sick', tier: 2, baseCost: 8, iconImg: 'assets/tokens/perk_morale.png', emoji: '💖', name: 'Tinh Thần Cao & Ít Ốm Hơn', desc: '+8% tinh thần khởi đầu, tăng +1 tinh thần mỗi đơn xong & giảm 35% nguy cơ nhân viên xin nghỉ ốm.' },
-      { id: 'start_cash', tier: 3, baseCost: 10, iconImg: null, emoji: '💰', name: 'Vốn Khởi Nghiệp $5,000', desc: 'Bắt đầu Ngày 1 với $5,000 thay vì $1,000 (+$4,000 thêm ở mỗi tầng cao hơn).' },
+      { id: 'start_cash', tier: 3, baseCost: 10, iconImg: null, emoji: '💰', name: 'Vốn Khởi Nghiệp $5,000', desc: 'Bắt đầu Ngày 1 với $5,000 thay vì $500 (+$4,000 thêm ở mỗi tầng cao hơn).' },
       { id: 'room_stars', tier: 3, baseCost: 11, iconImg: null, emoji: '⭐', name: '+1 Sao Khởi Đầu Mỗi Phòng Mở', desc: 'Nhận ngay +1 ★ uy tín cho mỗi phòng ban được mở khóa (cộng dồn theo tầng).' }
     ]
   },

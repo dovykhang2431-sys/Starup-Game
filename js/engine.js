@@ -7,7 +7,7 @@ window.STARUP_ENGINE = (() => {
   const EMP = window.STARUP_EMPIRE;
   const QST = window.STARUP_QUESTS;
   const PRS = window.STARUP_PRESTIGE;
-  const GAME_VERSION = '9.25';
+  const GAME_VERSION = '9.25.1';
 
   // Custom hand-crafted glossy emerald checkmark SVG harmonized with Starup's cream/wood palette
   const TICK_SVG = `<span class="starup-tick"><svg viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12.5" fill="#059669" stroke="#FFFDF9" stroke-width="2.2"/><path d="M4.2 12.2A10.2 10.2 0 0 1 23.8 12.2A10.2 7 0 0 0 4.2 12.2Z" fill="#34D399" opacity="0.55"/><path d="M8.5 14.3L12.3 18.1L19.8 10.4" stroke="#FFFDF9" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
@@ -2015,15 +2015,13 @@ window.STARUP_ENGINE = (() => {
     document.querySelectorAll('[data-pick-prestige-room]').forEach(btn => {
       btn.onclick = () => {
         const rid = btn.dataset.pickPrestigeRoom;
-        if (p.points < cost) return showToast('Chưa đủ Điểm Di Sản!');
-        p.points -= cost;
-        p.perks[perkDef.id] = nextTier;
-        p.activePerks[perkDef.id] = true;
-        p.chosenRooms.push(rid);
+        const res = PRS.purchasePerk(state, perkDef.id, rid);
+        if (!res.ok) return showToast(`❌ ${res.error}`);
         AUD.playSFX('unlock');
         autoSave();
-        showToast(`${TICK_SVG}Đã mở vĩnh viễn "${perkDef.name}" (${PRS.getRoomNameById(rid)})!`);
+        renderHUD();
         openIPOModal('ipo');
+        showToast(`${TICK_SVG}Đã mở vĩnh viễn "${perkDef.name}" (${PRS.getRoomNameById(rid)})!`);
       };
     });
   }
@@ -2323,27 +2321,26 @@ window.STARUP_ENGINE = (() => {
     document.querySelectorAll('[data-buy-perk]').forEach(b => {
       b.onclick = () => {
         if (!PRS) return;
-        const p = PRS.ensurePrestige(state);
         const perkId = b.dataset.buyPerk;
         const perkDef = (CFG.PRESTIGE_CFG.PERKS || []).find(x => x.id === perkId);
         if (!perkDef) return;
         const maxTier = PRS.getMaxReachableTier(state);
         const ownedLv = PRS.getOwnedLevel(state, perkId);
-        if (perkDef.tier > maxTier || ownedLv >= maxTier) return;
         const nextTier = ownedLv + 1;
-        const cost = PRS.getPerkCost(perkDef, nextTier);
-        if (p.points < cost) return showToast(`Cần ${cost} Điểm Di Sản để mua đặc quyền này!`);
+        const cost = PRS.getPerkCost(perkDef, Math.min(3, nextTier));
         if (perkId === 'unlock_room') {
+          if (perkDef.tier > maxTier || ownedLv >= maxTier) return showToast('❌ Đặc quyền phòng ban chưa khả dụng ở tầng này!');
+          if ((PRS.ensurePrestige(state).points || 0) < cost) return showToast(`❌ Cần ${cost} Điểm Di Sản để mua đặc quyền này!`);
           openRoomChoiceForPerkModal(perkDef, cost, nextTier);
           return;
         }
-        p.points -= cost;
-        p.perks[perkId] = nextTier;
-        p.activePerks[perkId] = true;
+        const res = PRS.purchasePerk(state, perkId, null);
+        if (!res.ok) return showToast(`❌ ${res.error}`);
         AUD.playSFX('unlock');
         autoSave();
+        renderHUD();
         openIPOModal('ipo');
-        showToast(`${TICK_SVG}Đã sở hữu vĩnh viễn "${perkDef.name}" (Cấp ${nextTier})!`);
+        showToast(`${TICK_SVG}Đã sở hữu vĩnh viễn "${res.perkDef.name}" (Cấp ${res.nextTier})!`);
       };
     });
   }
