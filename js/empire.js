@@ -29,6 +29,50 @@ window.STARUP_EMPIRE = (() => {
     return CFG.RIVALS.reduce((s, r) => s + (acquired.includes(r.id) ? r.dividend : 0), 0);
   }
 
+
+  const BRANCH_MAX_LV = 5;
+
+  function getBranchLevel(state, branchId) {
+    if (!branchId || branchId === 'hcm') return 1;
+    const raw = state && state.branchLevels && state.branchLevels[branchId];
+    return Math.min(BRANCH_MAX_LV, Math.max(1, Math.floor(Number(raw) || 1)));
+  }
+
+  function getBranchUpgradeCost(branch) {
+    if (!branch || branch.id === 'hcm' || !branch.reqVal) return 0;
+    return Math.round(branch.reqVal * 0.5);
+  }
+
+  function getBranchEffectiveStats(state, branchOrIdx) {
+    const b = (typeof branchOrIdx === 'number')
+      ? (CFG.BRANCHES[branchOrIdx] || CFG.BRANCHES[0])
+      : (branchOrIdx || CFG.BRANCHES[0]);
+    const level = getBranchLevel(state, b.id);
+    const mult = b.mult + (level - 1);
+    const dividend = Math.round(b.dividend * (1 + 0.25 * (level - 1)));
+    const upgradeCost = getBranchUpgradeCost(b);
+    return { branch: b, level, maxLv: BRANCH_MAX_LV, mult, dividend, upgradeCost };
+  }
+
+  function upgradeBranch(state, idx) {
+    const b = CFG.BRANCHES[idx];
+    if (!b) return { ok: false, error: 'Không tìm thấy chi nhánh này!' };
+    if (b.id === 'hcm') return { ok: false, error: 'Trụ sở chính TP.HCM không hỗ trợ nâng cấp chi nhánh!' };
+    const maxUnlocked = Math.max(state.branchIdx || 0, state.maxBranchIdx || 0);
+    if (idx > maxUnlocked) return { ok: false, error: 'Cần mở khóa chi nhánh trước khi nâng cấp!' };
+    const curLv = getBranchLevel(state, b.id);
+    if (curLv >= BRANCH_MAX_LV) return { ok: false, error: `${b.name} đã đạt cấp tối đa (Lv.${BRANCH_MAX_LV})!` };
+    const cost = getBranchUpgradeCost(b);
+    if ((state.money || 0) < cost) {
+      return { ok: false, error: `Cần ${FIN.fmtMoney(cost)} tiền mặt để nâng cấp ${b.name} lên Lv.${curLv + 1}!` };
+    }
+    state.money -= cost;
+    if (!state.branchLevels || typeof state.branchLevels !== 'object') state.branchLevels = {};
+    state.branchLevels[b.id] = curLv + 1;
+    const eff = getBranchEffectiveStats(state, idx);
+    return { ok: true, branch: b, level: curLv + 1, cost, eff };
+  }
+
   function buildEmpireModalHTML(state, activeTab, tickSvg) {
     const tabs = [
       { id: 'products', label: '🚀 Sản Phẩm' },
@@ -141,6 +185,9 @@ window.STARUP_EMPIRE = (() => {
             const isCur = (state.activeMapIdx !== undefined ? state.activeMapIdx : state.branchIdx) === idx;
             const unlocked = idx <= maxUnlocked;
             const canExp = state.ipoDone && idx === state.branchIdx + 1 && nw >= b.reqVal;
+            const eff = getBranchEffectiveStats(state, idx);
+            const canUpgrade = unlocked && b.id !== 'hcm' && eff.level < BRANCH_MAX_LV;
+            const hasCashForUpgrade = (state.money || 0) >= eff.upgradeCost;
             const branchLockLabel = !state.ipoDone
               ? `🔒 Cần IPO & ${FIN.fmtMoney(b.reqVal)}`
               : (idx > state.branchIdx + 1
@@ -148,17 +195,29 @@ window.STARUP_EMPIRE = (() => {
                   : `🔒 Cần tài sản ròng ${FIN.fmtMoney(b.reqVal)}`);
             return `
               <div style="padding:0.8cqw 1cqw;border-radius:1cqw;border:0.12cqw solid ${isCur ? '#10B981' : '#DFD2C1'};background:${isCur ? '#F0FDF4' : '#FAF6F0'};display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
-                <div>
-                  <div style="font-weight:800;color:#3D2B1F;">${b.name}</div>
+                <div style="min-width:0;flex:1;">
+                  <div style="font-weight:800;color:#3D2B1F;display:flex;align-items:center;gap:0.45cqw;flex-wrap:wrap;">
+                    <span>${b.name}</span>
+                    ${unlocked && b.id !== 'hcm' ? `<span style="padding:0.1cqw 0.5cqw;border-radius:999px;background:${eff.level >= BRANCH_MAX_LV ? '#F59E0B' : '#059669'};color:${eff.level >= BRANCH_MAX_LV ? '#451A03' : '#fff'};font-size:0.86cqw;font-weight:900;">${eff.level >= BRANCH_MAX_LV ? `Lv.${eff.level}/5 · Tối đa` : `Lv.${eff.level}/5`}</span>` : ''}
+                  </div>
                   <div style="font-size:1.0cqw;color:#6B5443;">${b.desc}</div>
+                  ${unlocked && b.id !== 'hcm' ? `<div style="font-size:0.94cqw;color:#047857;font-weight:800;margin-top:0.2cqw;">Hiệu dụng: x${eff.mult} giá hợp đồng · +${FIN.fmtMoney(eff.dividend)} cổ tức/ngày</div>` : ''}
                   ${!unlocked && b.reqVal > 0 ? `<div style="font-size:0.94cqw;color:${nw >= b.reqVal ? '#059669' : '#B45309'};font-weight:800;margin-top:0.2cqw;">Tài sản ròng: ${FIN.fmtMoney(nw)} / ${FIN.fmtMoney(b.reqVal)}${!state.ipoDone ? ' · Cần IPO' : ''}</div>` : ''}
                 </div>
-                ${unlocked
-                  ? (isCur
-                      ? `<span style="padding:0.35cqw 0.78cqw;border-radius:999px;background:#059669;color:#fff;font-weight:800;font-size:0.98cqw;white-space:nowrap;">Đang dùng mặt bằng</span>`
-                      : `<button data-switch-map="${idx}" type="button" style="padding:0.45cqw 0.85cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">🏢 Chuyển mặt bằng</button>`)
-                  : `<button data-expand-branch="${idx}" type="button" ${canExp ? '' : 'disabled'} style="padding:0.52cqw 0.88cqw;border-radius:0.85cqw;background:${canExp ? '#D97706' : '#D6CCC0'};color:${canExp ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:${canExp ? 'pointer' : 'not-allowed'};white-space:nowrap;font-size:0.96cqw;">${canExp ? '🚀 Mở rộng' : branchLockLabel}</button>`
-                }
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.4cqw;flex-shrink:0;">
+                  ${unlocked
+                    ? (isCur
+                        ? `<span style="padding:0.35cqw 0.78cqw;border-radius:999px;background:#059669;color:#fff;font-weight:800;font-size:0.98cqw;white-space:nowrap;">Đang dùng mặt bằng</span>`
+                        : `<button data-switch-map="${idx}" type="button" style="padding:0.45cqw 0.85cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">🏢 Chuyển mặt bằng</button>`)
+                    : `<button data-expand-branch="${idx}" type="button" ${canExp ? '' : 'disabled'} style="padding:0.52cqw 0.88cqw;border-radius:0.85cqw;background:${canExp ? '#D97706' : '#D6CCC0'};color:${canExp ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:${canExp ? 'pointer' : 'not-allowed'};white-space:nowrap;font-size:0.96cqw;">${canExp ? '🚀 Mở rộng' : branchLockLabel}</button>`
+                  }
+                  ${unlocked && b.id !== 'hcm'
+                    ? (canUpgrade
+                        ? `<button data-upgrade-branch="${idx}" type="button" style="padding:0.42cqw 0.8cqw;border-radius:0.78cqw;background:${hasCashForUpgrade ? '#2563EB' : '#D6CCC0'};color:${hasCashForUpgrade ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:pointer;white-space:nowrap;font-size:0.92cqw;">⬆️ Nâng Lv.${eff.level + 1} · ${FIN.fmtMoney(eff.upgradeCost)}</button>`
+                        : `<span style="padding:0.28cqw 0.7cqw;border-radius:999px;background:#FEF3C7;border:0.1cqw solid #F59E0B;color:#92400E;font-weight:900;font-size:0.9cqw;white-space:nowrap;">★ Tối đa</span>`)
+                    : ''
+                  }
+                </div>
               </div>
             `;
           }).join('')}
@@ -170,5 +229,5 @@ window.STARUP_EMPIRE = (() => {
     return tabBar + body;
   }
 
-  return { getSeason, getMarketShare, getDailyProductIncome, getDailyRivalDividend, buildEmpireModalHTML };
+  return { getSeason, getMarketShare, getDailyProductIncome, getDailyRivalDividend, getBranchLevel, getBranchUpgradeCost, getBranchEffectiveStats, upgradeBranch, buildEmpireModalHTML };
 })();

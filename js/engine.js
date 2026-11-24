@@ -7,7 +7,7 @@ window.STARUP_ENGINE = (() => {
   const EMP = window.STARUP_EMPIRE;
   const QST = window.STARUP_QUESTS;
   const PRS = window.STARUP_PRESTIGE;
-  const GAME_VERSION = '9.25.2';
+  const GAME_VERSION = '9.26';
 
   // Custom hand-crafted glossy emerald checkmark SVG harmonized with Starup's cream/wood palette
   const TICK_SVG = `<span class="starup-tick"><svg viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12.5" fill="#059669" stroke="#FFFDF9" stroke-width="2.2"/><path d="M4.2 12.2A10.2 10.2 0 0 1 23.8 12.2A10.2 7 0 0 0 4.2 12.2Z" fill="#34D399" opacity="0.55"/><path d="M8.5 14.3L12.3 18.1L19.8 10.4" stroke="#FFFDF9" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
@@ -109,6 +109,7 @@ window.STARUP_ENGINE = (() => {
       branchIdx: 0,
       maxBranchIdx: 0,
       activeMapIdx: 0,
+      branchLevels: {},
       dailyQuests: QST.generateDailyQuests(1),
       rooms,
       loan: null,
@@ -232,7 +233,16 @@ window.STARUP_ENGINE = (() => {
         : 0,
       sd: (st.roomSickLastDay && Object.keys(st.roomSickLastDay).length) ? st.roomSickLastDay : 0,
       rs: (st.roomStats && Object.keys(st.roomStats).length) ? st.roomStats : 0,
-      pg: st.prestige ? PRS.normalizePrestige(st.prestige) : 0
+      pg: st.prestige ? PRS.normalizePrestige(st.prestige) : 0,
+      bl: (() => {
+        const src = st.branchLevels || {};
+        const out = {};
+        Object.keys(src).forEach(k => {
+          const lv = Math.min(5, Math.max(1, Math.floor(Number(src[k]) || 1)));
+          if (k !== 'hcm' && lv > 1) out[k] = lv;
+        });
+        return Object.keys(out).length ? out : 0;
+      })()
     };
   }
 
@@ -355,6 +365,20 @@ window.STARUP_ENGINE = (() => {
     }
     if (d.rs && typeof d.rs === 'object') baseSt.roomStats = d.rs;
     baseSt.prestige = PRS ? PRS.normalizePrestige(d.pg || d.prestige || null) : { points: 0, totalEarned: 0, salesCount: 0, unlockedTier: 0, perks: {}, chosenRooms: [], activePerks: {}, hallOfFame: [] };
+    baseSt.branchLevels = {};
+    if (d.bl && typeof d.bl === 'object') {
+      if (Array.isArray(d.bl)) {
+        CFG.BRANCHES.forEach((b, i) => {
+          const lv = Math.min(5, Math.max(1, Math.floor(Number(d.bl[i]) || 1)));
+          if (b.id !== 'hcm' && lv > 1) baseSt.branchLevels[b.id] = lv;
+        });
+      } else {
+        Object.keys(d.bl).forEach(k => {
+          const lv = Math.min(5, Math.max(1, Math.floor(Number(d.bl[k]) || 1)));
+          if (k !== 'hcm' && lv > 1) baseSt.branchLevels[k] = lv;
+        });
+      }
+    }
     return baseSt;
   }
 
@@ -433,6 +457,7 @@ window.STARUP_ENGINE = (() => {
       if (typeof parsed.rooms[r.id].hasManager !== 'boolean') parsed.rooms[r.id].hasManager = false;
     });
     parsed.prestige = PRS ? PRS.normalizePrestige(parsed.prestige || null) : { points: 0, totalEarned: 0, salesCount: 0, unlockedTier: 0, perks: {}, chosenRooms: [], activePerks: {}, hallOfFame: [] };
+    if (!parsed.branchLevels || typeof parsed.branchLevels !== 'object') parsed.branchLevels = {};
     return { data: parsed, error: null };
   }
 
@@ -594,6 +619,14 @@ window.STARUP_ENGINE = (() => {
       `📣 Góc kinh doanh: Chạy chiến dịch Marketing giúp tăng mạnh tỷ lệ gặp Khách VIP 💎 tại sảnh.`,
       `🏦 Tin tài chính: Duy trì quỹ tiền mặt dương và dự phòng tiết kiệm giúp công ty vững vàng trước biến cố.`
     ];
+    const maxUnlocked = Math.max(state.branchIdx || 0, state.maxBranchIdx || 0);
+    if (CFG.BRANCH_NEWS) {
+      CFG.BRANCHES.forEach((b, idx) => {
+        if (idx <= maxUnlocked && Array.isArray(CFG.BRANCH_NEWS[b.id])) {
+          CFG.BRANCH_NEWS[b.id].forEach(txt => pool.push(`🌍 ${txt}`));
+        }
+      });
+    }
     const line = pool[(state.day - 1) % pool.length];
     addNews(line);
   }
@@ -807,7 +840,7 @@ window.STARUP_ENGINE = (() => {
     const vipChance = Math.min(0.85, baseVipChance + vipPerkLv * 0.10);
     const isVIP = tier === 'mega' || Math.random() < vipChance;
     const tierMult = tier === 'mega' ? 2.1 : (tier === 'rush' ? 1.75 : 1.0);
-    const branchMult = CFG.BRANCHES[state.branchIdx].mult;
+    const branchMult = EMP.getBranchEffectiveStats(state, state.branchIdx).mult;
     const starMult = 1 + Math.floor(state.stars / 15) * 0.08;
     const brandMult = 1 + (state.brandAwareness || 0) * 0.004;
     const mktMult = camp ? camp.rewardMult : 1;
@@ -1750,7 +1783,7 @@ window.STARUP_ENGINE = (() => {
       state.savings.fixedDaysLeft = Math.max(0, state.savings.fixedDaysLeft - 1);
     }
 
-    const dividend = CFG.BRANCHES[state.branchIdx].dividend;
+    const dividend = EMP.getBranchEffectiveStats(state, state.branchIdx).dividend;
     const prodIncome = EMP.getDailyProductIncome(state);
     const rivalDiv = EMP.getDailyRivalDividend(state);
     const passiveTotal = dividend + prodIncome + rivalDiv;
@@ -2325,9 +2358,13 @@ window.STARUP_ENGINE = (() => {
         state.branchIdx = idx;
         state.maxBranchIdx = Math.max(state.maxBranchIdx || 0, idx);
         state.activeMapIdx = idx;
+        const br = CFG.BRANCHES[idx];
+        if (br && CFG.BRANCH_NEWS && Array.isArray(CFG.BRANCH_NEWS[br.id]) && CFG.BRANCH_NEWS[br.id].length) {
+          addNews(`🌍 ${CFG.BRANCH_NEWS[br.id][0]}`);
+        }
         applyBranchMap();
-        AUD.playSFX('unlock'); autoSave(); openIPOModal('ipo');
-        showToast(`${TICK_SVG}Đã chuyển trụ sở sang ${CFG.BRANCHES[idx].name}!`);
+        AUD.playSFX('unlock'); autoSave(); renderHUD(); openIPOModal('ipo');
+        showToast(`${TICK_SVG}Đã chuyển trụ sở sang ${br.name}!`);
       };
     });
     document.querySelectorAll('[data-switch-map]').forEach(b => {
@@ -2337,6 +2374,18 @@ window.STARUP_ENGINE = (() => {
         applyBranchMap();
         AUD.playSFX('click'); autoSave(); openIPOModal('ipo');
         showToast(`${TICK_SVG}Đã chuyển sang mặt bằng ${CFG.BRANCHES[idx].name}!`);
+      };
+    });
+    document.querySelectorAll('[data-upgrade-branch]').forEach(b => {
+      b.onclick = () => {
+        const idx = Number(b.dataset.upgradeBranch);
+        const res = EMP.upgradeBranch(state, idx);
+        if (!res.ok) return showToast(`❌ ${res.error}`);
+        AUD.playSFX('unlock');
+        autoSave();
+        renderHUD();
+        openIPOModal('ipo');
+        showToast(`${TICK_SVG}Đã nâng cấp ${res.branch.name} lên Lv.${res.level} (x${res.eff.mult} đơn · +${FIN.fmtMoney(res.eff.dividend)}/ngày)!`);
       };
     });
     const btnSell = document.getElementById('btnSellCompany');

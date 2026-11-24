@@ -160,8 +160,34 @@ window.STARUP_CONFIG = {
   BRANCHES: [
     { id: 'hcm', mapSrc: 'assets/office_day.jpg', name: 'Trụ sở 1: TP.HCM (Startup)', mult: 1, dividend: 0, reqVal: 0, desc: 'Văn phòng 6 phòng ban — Nơi khởi nghiệp đầu tiên.' },
     { id: 'tokyo', mapSrc: 'assets/office_tokyo.jpg', name: 'Chi nhánh 2: Tokyo (Tập đoàn Công nghệ)', mult: 2, dividend: 2200, reqVal: 35000, desc: 'Mở sau khi IPO • Nhân đôi giá trị hợp đồng + $2,200 cổ tức/ngày.' },
-    { id: 'ny', mapSrc: 'assets/office_ny.jpg', name: 'Chi nhánh 3: New York (Đế chế Toàn cầu)', mult: 4, dividend: 6500, reqVal: 150000, desc: 'Đỉnh cao tập đoàn toàn cầu • Nhân 4 giá hợp đồng + $6,500 cổ tức/ngày.' }
+    { id: 'ny', mapSrc: 'assets/office_ny.jpg', name: 'Chi nhánh 3: New York (Đế chế Toàn cầu)', mult: 4, dividend: 6500, reqVal: 150000, desc: 'Đỉnh cao tập đoàn toàn cầu • Nhân 4 giá hợp đồng + $6,500 cổ tức/ngày.' },
+    { id: 'london', mapSrc: 'assets/office_london.jpg', name: 'Chi nhánh 4: London (Tập đoàn Anh Quốc)', mult: 6, dividend: 12000, reqVal: 400000, desc: 'Trung tâm tài chính châu Âu • Nhân 6 giá hợp đồng + $12,000 cổ tức/ngày.' },
+    { id: 'singapore', mapSrc: 'assets/office_singapore.jpg', name: 'Chi nhánh 5: Singapore (Trung tâm Châu Á)', mult: 8, dividend: 20000, reqVal: 800000, desc: 'Trung tâm công nghệ & tài chính Châu Á • Nhân 8 giá hợp đồng + $20,000 cổ tức/ngày.' },
+    { id: 'sydney', mapSrc: 'assets/office_sydney.jpg', name: 'Chi nhánh 6: Sydney (Cửa ngõ Châu Đại Dương)', mult: 10, dividend: 30000, reqVal: 1500000, desc: 'Cửa ngõ công nghệ Châu Đại Dương • Nhân 10 giá hợp đồng + $30,000 cổ tức/ngày.' },
+    { id: 'berlin', mapSrc: 'assets/office_berlin.jpg', name: 'Chi nhánh 7: Berlin (Thủ phủ Châu Âu)', mult: 12, dividend: 45000, reqVal: 2500000, desc: 'Thủ phủ AI & phần mềm Châu Âu • Nhân 12 giá hợp đồng + $45,000 cổ tức/ngày.' },
+    { id: 'seoul', mapSrc: 'assets/office_seoul.jpg', name: 'Chi nhánh 8: Seoul (Đế chế Công nghệ Hàn)', mult: 15, dividend: 70000, reqVal: 4000000, desc: 'Đế chế giải trí & bán dẫn hàng đầu • Nhân 15 giá hợp đồng + $70,000 cổ tức/ngày.' }
   ],
+
+  BRANCH_NEWS: {
+    london: [
+      'Thị trường London sôi động, các startup fintech ráo riết tuyển dev.',
+      'Đồng bảng Anh tăng giá, hợp đồng outsourcing từ London về nhiều hơn.'
+    ],
+    singapore: [
+      'Singapore siết chặt quy định fintech, nhu cầu app tuân thủ tăng vọt.',
+      'Các quỹ đầu tư Singapore đổ tiền vào startup khu vực.'
+    ],
+    sydney: [
+      'Thị trường Sydney khởi sắc, startup du lịch đặt hàng app đặt tour.'
+    ],
+    berlin: [
+      'Berlin thành trung tâm AI châu Âu, đơn hàng phần mềm tăng mạnh.'
+    ],
+    seoul: [
+      'K-pop thúc đẩy nhu cầu app fanclub, các công ty giải trí Hàn đặt hàng dồn dập.',
+      'Seoul đẩy mạnh chip bán dẫn, startup phần cứng cần app quản lý.'
+    ]
+  },
 
   SEASONS: [
     { id: 'growth', name: 'Mùa Tăng Trưởng', icon: '🌸', spawnMult: 1.12, rewardMult: 1.05, stockBias: { REAL: 0.04, FOOD: 0.03 } },
