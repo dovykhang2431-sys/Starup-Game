@@ -1,4 +1,4 @@
-const CACHE_NAME = 'starup-pwa-v9.24';
+const CACHE_NAME = 'starup-pwa-v9.25';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
@@ -12,11 +12,18 @@ const PRECACHE_ASSETS = [
   './js/empire.js',
   './js/quests.js',
   './js/pwa.js',
+  './js/prestige.js',
   './js/engine.js',
   './assets/office_day.jpg',
   './assets/office_night.jpg',
   './assets/office_tokyo.jpg',
   './assets/office_ny.jpg',
+  './assets/office_prestige.jpg',
+  './assets/tokens/legacy.png',
+  './assets/tokens/perk_contract.png',
+  './assets/tokens/perk_vip.png',
+  './assets/tokens/perk_office.png',
+  './assets/tokens/perk_morale.png',
   './assets/tokens/ceo.png',
   './assets/tokens/tech.png',
   './assets/tokens/marketing.png',

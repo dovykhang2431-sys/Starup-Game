@@ -163,6 +163,7 @@ window.STARUP_EMPIRE = (() => {
             `;
           }).join('')}
         </div>
+        ${window.STARUP_PRESTIGE ? window.STARUP_PRESTIGE.buildPrestigeSectionHTML(state, tickSvg) : ''}
       `;
     }
 

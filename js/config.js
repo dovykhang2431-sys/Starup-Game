@@ -183,4 +183,22 @@ window.STARUP_CONFIG = {
     { id: 'riv_apex',  name: 'Apex Corp',    icon: '🏢', cost: 45000,  share: 25, dividend: 4500,  reqStars: 95,  reqIPO: true },
     { id: 'riv_nova',  name: 'Nova Global',  icon: '🌐', cost: 120000, share: 30, dividend: 13000, reqStars: 140, reqIPO: true }
   ],
+
+  PRESTIGE_CFG: {
+    COEF_SHARE: 1500,
+    COEF_STARS: 600,
+    POINT_UNIT: 100000,
+    MAX_TIER: 3,
+    TIER_MULT: [1, 1.5, 2.2],
+    PERKS: [
+      { id: 'contract_val', tier: 1, baseCost: 7, iconImg: 'assets/tokens/perk_contract.png', emoji: '📜', name: '+10% Giá Hợp Đồng', desc: 'Tăng +10% thù lao mọi hợp đồng ở mỗi tầng sở hữu (cộng dồn tối đa +30%).' },
+      { id: 'unlock_room', tier: 1, baseCost: 8, iconImg: 'assets/tokens/perk_office.png', emoji: '🏢', name: 'Mở Khóa Sẵn 1 Phòng', desc: 'Chọn 1 phòng ban bị khóa ban đầu để mở sẵn miễn phí từ Ngày 1 (chọn phòng khác nhau ở mỗi tầng).' },
+      { id: 'vip_chance', tier: 1, baseCost: 6, iconImg: 'assets/tokens/perk_vip.png', emoji: '💎', name: 'Khách VIP Nhiều Hơn', desc: 'Tăng +10% tỷ lệ gặp Khách VIP 💎 & Dự Án Lớn tại sảnh ở mỗi tầng.' },
+      { id: 'job_speed', tier: 2, baseCost: 9, iconImg: null, emoji: '⚡', name: '+15% Tốc Độ Hoàn Thành Đơn', desc: 'Tăng +15% tốc độ xử lý hợp đồng của toàn bộ phòng ban ở mỗi tầng.' },
+      { id: 'fixed_cost', tier: 2, baseCost: 10, iconImg: null, emoji: '🧾', name: 'Giảm 10% Chi Phí Cố Định/Ngày', desc: 'Giảm 10% tiền thuê mặt bằng & lương nhân viên hằng ngày ở mỗi tầng.' },
+      { id: 'morale_sick', tier: 2, baseCost: 8, iconImg: 'assets/tokens/perk_morale.png', emoji: '💖', name: 'Tinh Thần Cao & Ít Ốm Hơn', desc: '+8% tinh thần khởi đầu, tăng +1 tinh thần mỗi đơn xong & giảm 35% nguy cơ nhân viên xin nghỉ ốm.' },
+      { id: 'start_cash', tier: 3, baseCost: 10, iconImg: null, emoji: '💰', name: 'Vốn Khởi Nghiệp $5,000', desc: 'Bắt đầu Ngày 1 với $5,000 thay vì $1,000 (+$4,000 thêm ở mỗi tầng cao hơn).' },
+      { id: 'room_stars', tier: 3, baseCost: 11, iconImg: null, emoji: '⭐', name: '+1 Sao Khởi Đầu Mỗi Phòng Mở', desc: 'Nhận ngay +1 ★ uy tín cho mỗi phòng ban được mở khóa (cộng dồn theo tầng).' }
+    ]
+  },
 };

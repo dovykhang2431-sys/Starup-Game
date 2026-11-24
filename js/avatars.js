@@ -29,7 +29,13 @@ window.STARUP_AVATARS = (() => {
       'assets/office_day.jpg',
       'assets/office_night.jpg',
       'assets/office_tokyo.jpg',
-      'assets/office_ny.jpg'
+      'assets/office_ny.jpg',
+      'assets/office_prestige.jpg',
+      'assets/tokens/legacy.png',
+      'assets/tokens/perk_contract.png',
+      'assets/tokens/perk_vip.png',
+      'assets/tokens/perk_office.png',
+      'assets/tokens/perk_morale.png'
     ]);
     urls.forEach(u => { const im = new Image(); im.src = u; });
   }

@@ -6,6 +6,8 @@ window.STARUP_ENGINE = (() => {
   const MKT = window.STARUP_MARKETING;
   const EMP = window.STARUP_EMPIRE;
   const QST = window.STARUP_QUESTS;
+  const PRS = window.STARUP_PRESTIGE;
+  const GAME_VERSION = '9.25';
 
   // Custom hand-crafted glossy emerald checkmark SVG harmonized with Starup's cream/wood palette
   const TICK_SVG = `<span class="starup-tick"><svg viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12.5" fill="#059669" stroke="#FFFDF9" stroke-width="2.2"/><path d="M4.2 12.2A10.2 10.2 0 0 1 23.8 12.2A10.2 7 0 0 0 4.2 12.2Z" fill="#34D399" opacity="0.55"/><path d="M8.5 14.3L12.3 18.1L19.8 10.4" stroke="#FFFDF9" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
@@ -46,7 +48,7 @@ window.STARUP_ENGINE = (() => {
     { node: 'recRight',  x: 54, y: 59 }
   ];
 
-  function createFreshState(ceoName, companyName, ceoAvatar) {
+  function createFreshState(ceoName, companyName, ceoAvatar, existingPrestige = null) {
     const rooms = {};
     CFG.ROOMS.forEach(r => {
       rooms[r.id] = {
@@ -116,10 +118,39 @@ window.STARUP_ENGINE = (() => {
       acquiredRivals: [],
       savings: { flex: 0, fixed: 0, fixedDaysLeft: 0 },
       stocks: CFG.STOCKS_INIT.map(s => ({ ...s, history: [...s.history], shares: 0, avgCost: 0, prevPrice: s.price })),
+      prestige: PRS ? PRS.normalizePrestige(existingPrestige) : { points: 0, totalEarned: 0, salesCount: 0, unlockedTier: 0, perks: {}, chosenRooms: [], activePerks: {}, hallOfFame: [] },
       newsHint: 'Ngày 1 khởi nghiệp: Chạm vào Khách ở Sảnh Lễ Tân để chốt hợp đồng đầu tiên!',
       newsList: [{ day: 1, text: 'Ngày 1 khởi nghiệp: Chạm vào Khách ở Sảnh Lễ Tân để chốt hợp đồng đầu tiên!' }],
       unreadNews: false
     };
+  }
+
+  function applyStartingPrestigePerks(st) {
+    if (!st || !PRS) return;
+    const p = PRS.ensurePrestige(st);
+    const cashLv = PRS.getActiveLevel(st, 'start_cash');
+    if (cashLv > 0) {
+      st.money = 5000 + (cashLv - 1) * 4000;
+      st.peakNetWorth = st.money;
+    }
+    const roomLv = PRS.getActiveLevel(st, 'unlock_room');
+    if (roomLv > 0 && Array.isArray(p.chosenRooms)) {
+      p.chosenRooms.slice(0, roomLv).forEach(rid => {
+        if (st.rooms[rid] && !st.rooms[rid].unlocked) {
+          st.rooms[rid].unlocked = true;
+          st.rooms[rid].staff = 1;
+        }
+      });
+    }
+    const starLv = PRS.getActiveLevel(st, 'room_stars');
+    if (starLv > 0) {
+      const unlockedCount = Object.values(st.rooms).filter(r => r && r.unlocked).length;
+      st.stars += unlockedCount * starLv;
+    }
+    const moraleLv = PRS.getActiveLevel(st, 'morale_sick');
+    if (moraleLv > 0) {
+      st.morale = Math.min(100, st.morale + 8 * moraleLv);
+    }
   }
 
   // ==================== SAVE / LOAD / ULTRA-COMPACT RECOVERY CODE (STARUP2) ====================
@@ -200,7 +231,8 @@ window.STARUP_ENGINE = (() => {
         ? [st.pendingEvent.kind, st.pendingEvent.roomId || '']
         : 0,
       sd: (st.roomSickLastDay && Object.keys(st.roomSickLastDay).length) ? st.roomSickLastDay : 0,
-      rs: (st.roomStats && Object.keys(st.roomStats).length) ? st.roomStats : 0
+      rs: (st.roomStats && Object.keys(st.roomStats).length) ? st.roomStats : 0,
+      pg: st.prestige ? PRS.normalizePrestige(st.prestige) : 0
     };
   }
 
@@ -322,6 +354,7 @@ window.STARUP_ENGINE = (() => {
       baseSt.roomSickLastDay = { [baseSt.lastSickRoomId]: baseSt.lastStaffSickDay };
     }
     if (d.rs && typeof d.rs === 'object') baseSt.roomStats = d.rs;
+    baseSt.prestige = PRS ? PRS.normalizePrestige(d.pg || d.prestige || null) : { points: 0, totalEarned: 0, salesCount: 0, unlockedTier: 0, perks: {}, chosenRooms: [], activePerks: {}, hallOfFame: [] };
     return baseSt;
   }
 
@@ -399,6 +432,7 @@ window.STARUP_ENGINE = (() => {
       if (!parsed.rooms[r.id]) parsed.rooms[r.id] = { unlocked: r.unlockedDefault, staff: r.unlockedDefault ? 1 : 0, equipLv: 1, speedLv: 1, hasManager: false, job: null };
       if (typeof parsed.rooms[r.id].hasManager !== 'boolean') parsed.rooms[r.id].hasManager = false;
     });
+    parsed.prestige = PRS ? PRS.normalizePrestige(parsed.prestige || null) : { points: 0, totalEarned: 0, salesCount: 0, unlockedTier: 0, perks: {}, chosenRooms: [], activePerks: {}, hallOfFame: [] };
     return { data: parsed, error: null };
   }
 
@@ -743,7 +777,9 @@ window.STARUP_ENGINE = (() => {
     if (state.day >= 3 && roll < 0.22) tier = 'mega';
     else if (state.day >= 2 && roll < 0.52) tier = 'rush';
 
-    const vipChance = camp ? camp.vipChance : 0.2;
+    const vipPerkLv = PRS ? PRS.getActiveLevel(state, 'vip_chance') : 0;
+    const baseVipChance = camp ? camp.vipChance : 0.2;
+    const vipChance = Math.min(0.85, baseVipChance + vipPerkLv * 0.10);
     const isVIP = tier === 'mega' || Math.random() < vipChance;
     const tierMult = tier === 'mega' ? 2.1 : (tier === 'rush' ? 1.75 : 1.0);
     const branchMult = CFG.BRANCHES[state.branchIdx].mult;
@@ -751,9 +787,11 @@ window.STARUP_ENGINE = (() => {
     const brandMult = 1 + (state.brandAwareness || 0) * 0.004;
     const mktMult = camp ? camp.rewardMult : 1;
     const equipMult = 1 + (rs.equipLv - 1) * 0.35;
+    const contractPerkLv = PRS ? PRS.getActiveLevel(state, 'contract_val') : 0;
+    const prestigeContractMult = 1 + contractPerkLv * 0.10;
 
     const seaMult = EMP.getSeason(state.day).rewardMult;
-    const reward = Math.round(targetRoom.baseReward * equipMult * starMult * brandMult * mktMult * branchMult * tierMult * seaMult * (isVIP && tier === 'normal' ? 1.35 : 1));
+    const reward = Math.round(targetRoom.baseReward * equipMult * starMult * brandMult * mktMult * branchMult * tierMult * seaMult * prestigeContractMult * (isVIP && tier === 'normal' ? 1.35 : 1));
     const effectiveStaff = Math.max(0.6, rs.staff - (state.sickStaffRoomId === targetRoom.id ? 0.55 : 0));
     const duration = Math.max(3.5, targetRoom.baseDuration * (tier === 'mega' ? 1.45 : 1) * (1 - (rs.speedLv - 1) * 0.1) / Math.max(0.7, effectiveStaff * 0.85));
 
@@ -865,7 +903,8 @@ window.STARUP_ENGINE = (() => {
     state.contractsDone += 1;
     recordQuestProgress('contracts', 1);
     recordQuestProgress('revenue', j.reward);
-    state.morale = Math.min(100, state.morale + 2);
+    const moralePerkBonus = PRS ? PRS.getActiveLevel(state, 'morale_sick') : 0;
+    state.morale = Math.min(100, state.morale + 2 + moralePerkBonus);
     state.dailyCompletedJobs.unshift({
       title: j.title, roomName: rc.name, roomIcon: rc.icon,
       reward: j.reward, stars: earnedStars, time: fmtTime(state.minutes)
@@ -1390,7 +1429,9 @@ window.STARUP_ENGINE = (() => {
 
     const pool = [];
     if ((state.day - (state.lastPowerOutageDay !== undefined ? state.lastPowerOutageDay : -10)) >= 6) pool.push('power_outage');
-    if ((state.day - (state.lastStaffSickDay !== undefined ? state.lastStaffSickDay : -10)) >= 6) pool.push('staff_sick');
+    const moraleSickLv = PRS ? PRS.getActiveLevel(state, 'morale_sick') : 0;
+    const sickSkipChance = Math.min(0.75, moraleSickLv * 0.35);
+    if ((state.day - (state.lastStaffSickDay !== undefined ? state.lastStaffSickDay : -10)) >= 6 && Math.random() >= sickSkipChance) pool.push('staff_sick');
     if ((state.day - (state.lastMacroWaveDay !== undefined ? state.lastMacroWaveDay : -10)) >= 4) pool.push('macro_wave');
     if ((state.day - (state.lastTaxAuditDay !== undefined ? state.lastTaxAuditDay : -10)) >= 3) pool.push('tax_audit');
     if ((state.day - (state.lastIndustryBoomDay !== undefined ? state.lastIndustryBoomDay : -10)) >= 3) pool.push('industry_boom');
@@ -1658,9 +1699,11 @@ window.STARUP_ENGINE = (() => {
       if (rs.unlocked) { totalRent += rc.dailyRent; totalSalary += rc.staffSalary * rs.staff; }
     });
 
-    // Finance Room operating cost discount!
+    // Finance Room + Prestige fixed_cost operating cost discount!
     const hasFin = state.rooms.finance.unlocked;
-    const discountRate = hasFin ? Math.min(0.30, 0.12 + state.rooms.finance.equipLv * 0.03) : 0;
+    const finDiscountRate = hasFin ? Math.min(0.30, 0.12 + state.rooms.finance.equipLv * 0.03) : 0;
+    const prestigeFixedLv = PRS ? PRS.getActiveLevel(state, 'fixed_cost') : 0;
+    const discountRate = Math.min(0.60, finDiscountRate + prestigeFixedLv * 0.10);
     const savedCost = Math.round((totalRent + totalSalary) * discountRate);
     const finalOpCost = totalRent + totalSalary - savedCost;
 
@@ -1936,6 +1979,266 @@ window.STARUP_ENGINE = (() => {
     });
   }
 
+
+  function openHallOfFameModal() {
+    if (!PRS) return;
+    if (!state) {
+      const saved = loadSavedFromStorage();
+      state = saved || createFreshState('Minh Founder', 'Nova Tech', 'ceo');
+    }
+    PRS.ensurePrestige(state);
+    openModal('🏛️ Sảnh Danh Vọng — Di Sản Doanh Nhân', PRS.buildHallOfFameHTML(state));
+  }
+
+  function openRoomChoiceForPerkModal(perkDef, cost, nextTier) {
+    const p = PRS.ensurePrestige(state);
+    const candidates = PRS.getLockableRooms().filter(r => !p.chosenRooms.includes(r.id));
+    if (!candidates.length) {
+      showToast('Tất cả các phòng ban khóa ban đầu đều đã được chọn!');
+      return;
+    }
+    openModal('🏢 Chọn Phòng Ban Mở Khóa Sẵn', `
+      <p style="color:#5C4636;margin:0 0 0.85cqw 0;line-height:1.4;">
+        Chọn <strong>1 phòng ban</strong> để tự động mở khóa miễn phí ngay từ <strong>Ngày 1</strong> ở mọi lần khởi nghiệp sau (Cấp ${nextTier} · Giá <strong>${cost} Điểm Di Sản</strong>):
+      </p>
+      <div style="display:flex;flex-direction:column;gap:0.55cqw;">
+        ${candidates.map(r => `
+          <button data-pick-prestige-room="${r.id}" type="button" style="padding:0.75cqw 0.95cqw;border-radius:0.95cqw;background:#FAF6F0;border:0.13cqw solid #D8C7B2;color:#3D2B1F;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:space-between;text-align:left;">
+            <span>${r.icon} <strong>${r.name}</strong> <span style="font-weight:600;color:#6B5443;font-size:0.96cqw;">(Giá gốc ${FIN.fmtMoney(r.unlockCost)})</span></span>
+            <span style="padding:0.3cqw 0.75cqw;border-radius:0.75cqw;background:#059669;color:#fff;font-size:0.94cqw;">Chọn & Mua (${cost} điểm)</span>
+          </button>
+        `).join('')}
+      </div>
+      <button id="btnCancelPickRoom" type="button" style="margin-top:0.85cqw;width:100%;padding:0.65cqw;border-radius:0.85cqw;background:#EFE6DA;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">← Quay lại tab IPO</button>
+    `);
+    document.getElementById('btnCancelPickRoom').onclick = () => openIPOModal('ipo');
+    document.querySelectorAll('[data-pick-prestige-room]').forEach(btn => {
+      btn.onclick = () => {
+        const rid = btn.dataset.pickPrestigeRoom;
+        if (p.points < cost) return showToast('Chưa đủ Điểm Di Sản!');
+        p.points -= cost;
+        p.perks[perkDef.id] = nextTier;
+        p.activePerks[perkDef.id] = true;
+        p.chosenRooms.push(rid);
+        AUD.playSFX('unlock');
+        autoSave();
+        showToast(`${TICK_SVG}Đã mở vĩnh viễn "${perkDef.name}" (${PRS.getRoomNameById(rid)})!`);
+        openIPOModal('ipo');
+      };
+    });
+  }
+
+  function openSellCompanyStep1Modal() {
+    if (!state || !state.ipoDone || !PRS) return;
+    const p = PRS.ensurePrestige(state);
+    const val = PRS.calcSaleValuation(state);
+    const nextMaxTier = Math.min(3, 1 + Math.min(2, (p.unlockedTier || 0) + 1));
+    openModal('💰 Bán Công Ty & Kế Thừa Di Sản (Bước 1/2)', `
+      <div style="padding:0.95cqw 1.05cqw;border-radius:1.05cqw;background:#FFFBEB;border:0.14cqw solid #F59E0B;margin-bottom:0.85cqw;">
+        <div style="font-weight:900;font-size:1.18cqw;color:#78350F;margin-bottom:0.45cqw;">📊 Bảng Định Giá Thoái Vốn: ${escapeHtml(state.companyName)} [${escapeHtml(state.ticker)}]</div>
+        <div style="display:flex;flex-direction:column;gap:0.35cqw;font-size:1.02cqw;color:#4A3426;">
+          <div style="display:flex;justify-content:space-between;"><span>1. Tài sản ròng hiện tại:</span><strong>${FIN.fmtMoney(val.netWorth)}</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>2. Giá trị thị phần (${val.marketShare}% × ${FIN.fmtMoney(val.coefA)}):</span><strong>+${FIN.fmtMoney(val.sharePart)}</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>3. Giá trị thương hiệu (${val.stars} ★ × ${FIN.fmtMoney(val.coefB)}):</span><strong>+${FIN.fmtMoney(val.starsPart)}</strong></div>
+          <div style="display:flex;justify-content:space-between;padding-top:0.45cqw;border-top:0.12cqw solid #FCD34D;font-size:1.15cqw;font-weight:900;color:#059669;">
+            <span>TỔNG ĐỊNH GIÁ BÁN:</span>
+            <span>${FIN.fmtMoney(val.valuation)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:0.45cqw 0.7cqw;border-radius:0.8cqw;background:#FEF3C7;margin-top:0.25cqw;font-weight:900;color:#92400E;">
+            <span>Quy đổi Điểm Di Sản (mỗi $100,000 = 1 điểm):</span>
+            <span style="font-size:1.22cqw;">+${val.points} Điểm Di Sản</span>
+          </div>
+        </div>
+      </div>
+      <div style="padding:0.75cqw 0.95cqw;border-radius:0.95cqw;background:#FEF2F2;border:0.13cqw solid #FECACA;color:#991B1B;font-size:0.98cqw;line-height:1.42;margin-bottom:0.95cqw;">
+        ⚠️ <strong>Cảnh báo không thể hoàn tác:</strong> Toàn bộ tiền mặt, phòng ban, nhân sự, cổ phiếu, chi nhánh và tiến độ <strong>Ngày ${state.day}</strong> hiện tại sẽ được đặt lại về <strong>Ngày 1</strong>. Bạn sẽ giữ vĩnh viễn <strong>${p.points + val.points} Điểm Di Sản</strong>, mở khóa tới <strong>Tầng ${nextMaxTier}/3</strong> Cây Đặc Quyền và ghi danh vào <strong>Sảnh Danh Vọng</strong>.
+      </div>
+      <div style="display:flex;gap:0.7cqw;">
+        <button id="btnCancelSell1" type="button" style="flex:1;padding:0.85cqw;border-radius:0.95cqw;background:#EFE6DA;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">Hủy bỏ</button>
+        <button id="btnProceedSell2" type="button" style="flex:1.5;padding:0.85cqw;border-radius:0.95cqw;background:linear-gradient(180deg,#D97706,#B45309);color:#fff;font-weight:900;border:none;cursor:pointer;">Tiếp tục xác nhận bán →</button>
+      </div>
+    `);
+    document.getElementById('btnCancelSell1').onclick = () => openIPOModal('ipo');
+    document.getElementById('btnProceedSell2').onclick = () => openSellCompanyStep2HoldModal(val);
+  }
+
+  function openSellCompanyStep2HoldModal(val) {
+    openModal('🔒 Xác Nhận Lần Cuối — Giữ Để Bán Công Ty (Bước 2/2)', `
+      <div style="text-align:center;padding:0.5cqw 0;">
+        <img src="assets/tokens/legacy.png" alt="Điểm Di Sản" style="width:4.2cqw;height:4.2cqw;object-fit:contain;margin:0 auto 0.45cqw auto;display:block;" />
+        <div style="font-size:1.25cqw;font-weight:900;color:#3D2B1F;">Bán ${escapeHtml(state.companyName)} [${escapeHtml(state.ticker)}] với giá ${FIN.fmtMoney(val.valuation)}</div>
+        <div style="font-size:1.05cqw;font-weight:800;color:#B45309;margin-top:0.2cqw;">Nhận ngay +${val.points} Điểm Di Sản & Bắt đầu New Game+ từ Ngày 1</div>
+        <p style="font-size:0.96cqw;color:#991B1B;font-weight:700;margin:0.55cqw 0 0.9cqw 0;">
+          Hành động này không thể hoàn tác trong phiên chơi hiện tại. Hãy <strong>BẤM VÀ GIỮ</strong> nút đỏ bên dưới trong <strong>3 giây</strong> để ký hợp đồng chuyển nhượng!
+        </p>
+        <div style="position:relative;width:100%;height:3.6cqw;border-radius:1.1cqw;background:#7F1D1D;overflow:hidden;border:0.16cqw solid #FCA5A5;user-select:none;-webkit-user-select:none;">
+          <div id="holdSellFill" style="position:absolute;inset:0;width:0%;background:linear-gradient(90deg,#EF4444,#F59E0B);pointer-events:none;"></div>
+          <button id="btnHoldConfirmSell" type="button" style="position:relative;z-index:2;width:100%;height:100%;background:transparent;color:#FFFDF9;font-size:1.14cqw;font-weight:900;border:none;cursor:pointer;">
+            ✊ BẤM GIỮ 3 GIÂY ĐỂ KÝ BÁN CÔNG TY
+          </button>
+        </div>
+        <button id="btnBackSellStep1" type="button" style="margin-top:0.85cqw;padding:0.55cqw 1.2cqw;border-radius:0.85cqw;background:#EFE6DA;color:#4A3426;font-weight:800;border:0.12cqw solid #D8C7B2;cursor:pointer;">← Quay lại</button>
+      </div>
+    `);
+
+    const btnHold = document.getElementById('btnHoldConfirmSell');
+    const fillEl = document.getElementById('holdSellFill');
+    let holdRaf = null;
+    let holdStart = 0;
+    let completed = false;
+    const HOLD_MS = 3000;
+
+    const stopHold = () => {
+      if (completed) return;
+      holdStart = 0;
+      if (holdRaf) cancelAnimationFrame(holdRaf);
+      holdRaf = null;
+      if (fillEl) fillEl.style.width = '0%';
+      if (btnHold) btnHold.textContent = '✊ BẤM GIỮ 3 GIÂY ĐỂ KÝ BÁN CÔNG TY';
+    };
+
+    const stepHold = (ts) => {
+      if (!holdStart || completed) return;
+      const elapsed = ts - holdStart;
+      const pct = Math.min(100, (elapsed / HOLD_MS) * 100);
+      if (fillEl) fillEl.style.width = pct.toFixed(1) + '%';
+      const rem = Math.max(0, (HOLD_MS - elapsed) / 1000);
+      if (btnHold) btnHold.textContent = `⏳ Đang ký hợp đồng... (${rem.toFixed(1)}s)`;
+      if (elapsed >= HOLD_MS) {
+        completed = true;
+        executePrestigeSale(val);
+        return;
+      }
+      holdRaf = requestAnimationFrame(stepHold);
+    };
+
+    const startHold = (e) => {
+      if (e) e.preventDefault();
+      if (completed || holdStart) return;
+      holdStart = performance.now();
+      AUD.playSFX('click');
+      holdRaf = requestAnimationFrame(stepHold);
+    };
+
+    btnHold.addEventListener('pointerdown', startHold);
+    btnHold.addEventListener('pointerup', stopHold);
+    btnHold.addEventListener('pointerleave', stopHold);
+    btnHold.addEventListener('pointercancel', stopHold);
+    document.getElementById('btnBackSellStep1').onclick = () => { stopHold(); openSellCompanyStep1Modal(); };
+  }
+
+  function executePrestigeSale(val) {
+    const p = PRS.ensurePrestige(state);
+    p.points += val.points;
+    p.totalEarned += val.points;
+    p.salesCount += 1;
+    p.unlockedTier = Math.min(2, (p.unlockedTier || 0) + 1);
+    p.hallOfFame.unshift({
+      companyName: state.companyName,
+      ticker: state.ticker || 'STR',
+      valuation: val.valuation,
+      day: state.day,
+      pointsEarned: val.points,
+      ts: Date.now()
+    });
+    p.hallOfFame.sort((a, b) => b.valuation - a.valuation);
+
+    const prevCeo = state.ceoName;
+    const prevAva = state.ceoAvatar;
+    state = createFreshState(prevCeo, 'Nova Tech', prevAva, p);
+    autoSave();
+    AUD.playSFX('unlock');
+    closeModal();
+    openNewGamePlusSetupModal(val);
+  }
+
+  function openNewGamePlusSetupModal(lastSaleVal = null) {
+    const p = PRS.ensurePrestige(state);
+    const perks = (CFG.PRESTIGE_CFG && CFG.PRESTIGE_CFG.PERKS) || [];
+    const ownedPerks = perks.filter(pk => (p.perks[pk.id] || 0) > 0);
+    ownedPerks.forEach(pk => {
+      if (p.activePerks[pk.id] === undefined) p.activePerks[pk.id] = true;
+    });
+
+    const saleBanner = lastSaleVal ? `
+      <div style="padding:0.75cqw 0.95cqw;border-radius:0.95cqw;background:#ECFDF5;border:0.13cqw solid #6EE7B7;color:#065F46;margin-bottom:0.85cqw;font-size:1.0cqw;">
+        ${TICK_SVG}<strong>Thoái vốn thành công!</strong> Bạn vừa nhận <strong>+${lastSaleVal.points} Điểm Di Sản</strong> (Tổng khả dụng: <strong>${p.points} điểm</strong>). Hãy thiết lập công ty mới cho vòng <strong>Khởi Nghiệp Lại (New Game+)</strong>!
+      </div>
+    ` : '';
+
+    openModal('🌟 Khởi Nghiệp Lại (New Game+ — Ngày 1)', `
+      ${saleBanner}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7cqw;margin-bottom:0.85cqw;">
+        <div>
+          <label style="display:block;font-size:0.96cqw;font-weight:800;color:#5C4636;margin-bottom:0.25cqw;">Tên CEO</label>
+          <input id="ngpCeoName" type="text" value="${escapeHtml(state.ceoName)}" maxlength="20" style="width:100%;padding:0.58cqw 0.8cqw;border-radius:0.8cqw;border:0.13cqw solid #D8C7B2;background:#FFFDF9;color:#3D2B1F;font-size:1.08cqw;font-weight:700;" />
+        </div>
+        <div>
+          <label style="display:block;font-size:0.96cqw;font-weight:800;color:#5C4636;margin-bottom:0.25cqw;">Tên Công Ty Mới</label>
+          <input id="ngpCompName" type="text" value="${escapeHtml(state.companyName)}" maxlength="20" style="width:100%;padding:0.58cqw 0.8cqw;border-radius:0.8cqw;border:0.13cqw solid #D8C7B2;background:#FFFDF9;color:#3D2B1F;font-size:1.08cqw;font-weight:700;" />
+        </div>
+      </div>
+
+      <div style="padding:0.8cqw 0.95cqw;border-radius:1cqw;background:#FAF6F0;border:0.12cqw solid #DFD2C1;margin-bottom:0.85cqw;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5cqw;">
+          <strong style="color:#3D2B1F;font-size:1.05cqw;">✨ Đặc Quyền Vĩnh Viễn Kích Hoạt (Mặc định bật hết)</strong>
+          <button id="btnNgpBuyMore" type="button" style="padding:0.35cqw 0.75cqw;border-radius:0.75cqw;background:#D97706;color:#fff;font-weight:800;border:none;cursor:pointer;font-size:0.92cqw;">🌳 Mua thêm đặc quyền (${p.points} điểm)</button>
+        </div>
+        ${ownedPerks.length === 0 ? `
+          <div style="font-size:0.96cqw;color:#6B5443;padding:0.4cqw 0;">Bạn chưa mua đặc quyền nào. Bấm <em>Mua thêm đặc quyền</em> ở trên để dùng <strong>${p.points} Điểm Di Sản</strong> trước khi bắt đầu!</div>
+        ` : `
+          <div style="display:flex;flex-direction:column;gap:0.45cqw;">
+            ${ownedPerks.map(pk => {
+              const lv = p.perks[pk.id] || 1;
+              const checked = p.activePerks[pk.id] !== false;
+              const roomNote = (pk.id === 'unlock_room' && p.chosenRooms.length)
+                ? ` — Phòng: <strong>${p.chosenRooms.slice(0, lv).map(PRS.getRoomNameById).join(', ')}</strong>`
+                : '';
+              return `
+                <label style="display:flex;align-items:center;justify-content:space-between;gap:0.7cqw;padding:0.55cqw 0.75cqw;border-radius:0.85cqw;background:#FFFDF9;border:0.12cqw solid #E5D9C8;cursor:pointer;">
+                  <div style="display:flex;align-items:center;gap:0.55cqw;">
+                    ${PRS.renderPerkIcon(pk, 2.1)}
+                    <div>
+                      <div style="font-weight:900;color:#3D2B1F;font-size:0.98cqw;">${pk.name} (Cấp ${lv})</div>
+                      <div style="font-size:0.88cqw;color:#6B5443;">${pk.desc}${roomNote}</div>
+                    </div>
+                  </div>
+                  <input type="checkbox" data-ngp-perk="${pk.id}" ${checked ? 'checked' : ''} style="width:1.35cqw;height:1.35cqw;accent-color:#059669;cursor:pointer;" />
+                </label>
+              `;
+            }).join('')}
+          </div>
+        `}
+      </div>
+
+      <button id="btnStartNewGamePlus" type="button" style="width:100%;padding:0.92cqw;border-radius:1cqw;background:linear-gradient(180deg,#10B981,#047857);color:#fff;font-size:1.18cqw;font-weight:900;border:none;cursor:pointer;">
+        🚀 Khởi Nghiệp Lại Từ Ngày 1
+      </button>
+    `);
+    document.getElementById('btnCloseModal').classList.add('hidden');
+
+    document.getElementById('btnNgpBuyMore').onclick = () => {
+      document.getElementById('btnCloseModal').classList.remove('hidden');
+      openIPOModal('ipo');
+    };
+    document.querySelectorAll('[data-ngp-perk]').forEach(cb => {
+      cb.onchange = () => {
+        p.activePerks[cb.dataset.ngpPerk] = cb.checked;
+        autoSave();
+      };
+    });
+    document.getElementById('btnStartNewGamePlus').onclick = () => {
+      const ceo = (document.getElementById('ngpCeoName').value || '').trim() || state.ceoName;
+      const comp = (document.getElementById('ngpCompName').value || '').trim() || 'Nova Tech';
+      const fresh = createFreshState(ceo, comp, state.ceoAvatar, p);
+      applyStartingPrestigePerks(fresh);
+      state = fresh;
+      document.getElementById('btnCloseModal').classList.remove('hidden');
+      closeModal();
+      beginGameplay(true);
+    };
+  }
+
   function openIPOModal(tab = activeEmpireTab) {
     activeEmpireTab = tab;
     openModal('🌍 Tập Đoàn — Sản Phẩm · M&A · IPO', EMP.buildEmpireModalHTML(state, activeEmpireTab, TICK_SVG));
@@ -2011,6 +2314,36 @@ window.STARUP_ENGINE = (() => {
         applyBranchMap();
         AUD.playSFX('click'); autoSave(); openIPOModal('ipo');
         showToast(`${TICK_SVG}Đã chuyển sang mặt bằng ${CFG.BRANCHES[idx].name}!`);
+      };
+    });
+    const btnSell = document.getElementById('btnSellCompany');
+    if (btnSell) btnSell.onclick = () => openSellCompanyStep1Modal();
+    const btnHof = document.getElementById('btnOpenHallOfFame');
+    if (btnHof) btnHof.onclick = () => openHallOfFameModal();
+    document.querySelectorAll('[data-buy-perk]').forEach(b => {
+      b.onclick = () => {
+        if (!PRS) return;
+        const p = PRS.ensurePrestige(state);
+        const perkId = b.dataset.buyPerk;
+        const perkDef = (CFG.PRESTIGE_CFG.PERKS || []).find(x => x.id === perkId);
+        if (!perkDef) return;
+        const maxTier = PRS.getMaxReachableTier(state);
+        const ownedLv = PRS.getOwnedLevel(state, perkId);
+        if (perkDef.tier > maxTier || ownedLv >= maxTier) return;
+        const nextTier = ownedLv + 1;
+        const cost = PRS.getPerkCost(perkDef, nextTier);
+        if (p.points < cost) return showToast(`Cần ${cost} Điểm Di Sản để mua đặc quyền này!`);
+        if (perkId === 'unlock_room') {
+          openRoomChoiceForPerkModal(perkDef, cost, nextTier);
+          return;
+        }
+        p.points -= cost;
+        p.perks[perkId] = nextTier;
+        p.activePerks[perkId] = true;
+        AUD.playSFX('unlock');
+        autoSave();
+        openIPOModal('ipo');
+        showToast(`${TICK_SVG}Đã sở hữu vĩnh viễn "${perkDef.name}" (Cấp ${nextTier})!`);
       };
     });
   }
@@ -2508,7 +2841,8 @@ window.STARUP_ENGINE = (() => {
 
           const hhBoost = state.happyHourLeft > 0 ? 2 : 1;
           const pantryBoost = (state.rooms.pantry.unlocked && phase.key === 'afternoon') ? 1.25 : 1;
-          rs.job.progress += (100 / rs.job.duration) * dt * hhBoost * pantryBoost * moraleMult;
+          const speedPerkLv = PRS ? PRS.getActiveLevel(state, 'job_speed') : 0;
+          rs.job.progress += (100 / rs.job.duration) * dt * hhBoost * pantryBoost * moraleMult * (1 + speedPerkLv * 0.15);
 
           if (!rs.job.issueChecked && rs.job.progress >= 50) {
             rs.job.issueChecked = true;
@@ -2653,6 +2987,9 @@ window.STARUP_ENGINE = (() => {
           <button id="btnIntroRestore" type="button" style="flex:1;padding:0.95cqw;border-radius:1.1cqw;background:#F4ECE0;color:#4A3426;font-size:1.18cqw;font-weight:800;border:0.13cqw solid #D8C7B2;cursor:pointer;">
             🔑 Nhập Mã Lưu
           </button>
+          <button id="btnIntroHallOfFame" type="button" style="flex:1;padding:0.95cqw;border-radius:1.1cqw;background:#FFFBEB;color:#92400E;font-size:1.12cqw;font-weight:800;border:0.14cqw solid #F59E0B;cursor:pointer;">
+            🏛️ Sảnh Danh Vọng${saved && saved.prestige && saved.prestige.salesCount > 0 ? ` (${saved.prestige.salesCount})` : ''}
+          </button>
         </div>
       </div>
     `;
@@ -2665,10 +3002,19 @@ window.STARUP_ENGINE = (() => {
     });
     const btnCont = document.getElementById('btnContinueSave');
     if (btnCont && saved) btnCont.onclick = () => { state = saved; beginGameplay(false); };
+    const btnIntroHof = document.getElementById('btnIntroHallOfFame');
+    if (btnIntroHof) {
+      btnIntroHof.onclick = () => {
+        if (!state) state = saved || createFreshState('Minh Founder', 'Nova Tech', chosenAvatar);
+        openHallOfFameModal();
+      };
+    }
     document.getElementById('btnStartNew').onclick = () => {
       const ceo = document.getElementById('inpCeoName').value.trim() || 'Minh Founder';
       const comp = document.getElementById('inpCompName').value.trim() || 'Nova Tech';
-      state = createFreshState(ceo, comp, chosenAvatar);
+      const carryPrestige = (saved && saved.prestige) ? saved.prestige : (state && state.prestige ? state.prestige : null);
+      state = createFreshState(ceo, comp, chosenAvatar, carryPrestige);
+      applyStartingPrestigePerks(state);
       beginGameplay(true);
     };
     document.getElementById('btnIntroRestore').onclick = () => {
