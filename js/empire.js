@@ -184,7 +184,8 @@ window.STARUP_EMPIRE = (() => {
             const maxUnlocked = Math.max(state.branchIdx || 0, state.maxBranchIdx || 0);
             const isCur = (state.activeMapIdx !== undefined ? state.activeMapIdx : state.branchIdx) === idx;
             const unlocked = idx <= maxUnlocked;
-            const canExp = state.ipoDone && idx === state.branchIdx + 1 && nw >= b.reqVal;
+            const hasCashForExp = (state.money || 0) >= b.reqVal;
+            const canExp = state.ipoDone && idx === state.branchIdx + 1 && nw >= b.reqVal && hasCashForExp;
             const eff = getBranchEffectiveStats(state, idx);
             const canUpgrade = unlocked && b.id !== 'hcm' && eff.level < BRANCH_MAX_LV;
             const hasCashForUpgrade = (state.money || 0) >= eff.upgradeCost;
@@ -192,7 +193,9 @@ window.STARUP_EMPIRE = (() => {
               ? `🔒 Cần IPO & ${FIN.fmtMoney(b.reqVal)}`
               : (idx > state.branchIdx + 1
                   ? `🔒 Mở chi nhánh trước (${FIN.fmtMoney(b.reqVal)})`
-                  : `🔒 Cần tài sản ròng ${FIN.fmtMoney(b.reqVal)}`);
+                  : (nw < b.reqVal
+                      ? `🔒 Cần tài sản ròng ${FIN.fmtMoney(b.reqVal)}`
+                      : `🔒 Cần ${FIN.fmtMoney(b.reqVal)} tiền mặt để mở`));
             return `
               <div style="padding:0.8cqw 1cqw;border-radius:1cqw;border:0.12cqw solid ${isCur ? '#10B981' : '#DFD2C1'};background:${isCur ? '#F0FDF4' : '#FAF6F0'};display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
                 <div style="min-width:0;flex:1;">
@@ -209,7 +212,7 @@ window.STARUP_EMPIRE = (() => {
                     ? (isCur
                         ? `<span style="padding:0.35cqw 0.78cqw;border-radius:999px;background:#059669;color:#fff;font-weight:800;font-size:0.98cqw;white-space:nowrap;">Đang dùng mặt bằng</span>`
                         : `<button data-switch-map="${idx}" type="button" style="padding:0.45cqw 0.85cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">🏢 Chuyển mặt bằng</button>`)
-                    : `<button data-expand-branch="${idx}" type="button" ${canExp ? '' : 'disabled'} style="padding:0.52cqw 0.88cqw;border-radius:0.85cqw;background:${canExp ? '#D97706' : '#D6CCC0'};color:${canExp ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:${canExp ? 'pointer' : 'not-allowed'};white-space:nowrap;font-size:0.96cqw;">${canExp ? '🚀 Mở rộng' : branchLockLabel}</button>`
+                    : `<button data-expand-branch="${idx}" type="button" ${canExp ? '' : 'disabled'} style="padding:0.52cqw 0.88cqw;border-radius:0.85cqw;background:${canExp ? '#D97706' : '#D6CCC0'};color:${canExp ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:${canExp ? 'pointer' : 'not-allowed'};white-space:nowrap;font-size:0.96cqw;">${canExp ? `🚀 Mở rộng · ${FIN.fmtMoney(b.reqVal)}` : branchLockLabel}</button>`
                   }
                   ${unlocked && b.id !== 'hcm'
                     ? (canUpgrade

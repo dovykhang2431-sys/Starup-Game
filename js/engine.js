@@ -7,7 +7,7 @@ window.STARUP_ENGINE = (() => {
   const EMP = window.STARUP_EMPIRE;
   const QST = window.STARUP_QUESTS;
   const PRS = window.STARUP_PRESTIGE;
-  const GAME_VERSION = '9.26';
+  const GAME_VERSION = '9.26.1';
 
   // Custom hand-crafted glossy emerald checkmark SVG harmonized with Starup's cream/wood palette
   const TICK_SVG = `<span class="starup-tick"><svg viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12.5" fill="#059669" stroke="#FFFDF9" stroke-width="2.2"/><path d="M4.2 12.2A10.2 10.2 0 0 1 23.8 12.2A10.2 7 0 0 0 4.2 12.2Z" fill="#34D399" opacity="0.55"/><path d="M8.5 14.3L12.3 18.1L19.8 10.4" stroke="#FFFDF9" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;
@@ -36,6 +36,8 @@ window.STARUP_ENGINE = (() => {
   let toastTimer = null;
   let saveDotTimer = null;
   let lastOverlaySig = '';
+  let lastRoomOverlaySig = '';
+  let lastClientOverlaySig = '';
   let lastDrawerMoney = null;
   let moneyDisplayMode = 'auto'; // 'auto' | 'exact' | 'compact'
   let autoSaveAccum = 0;
@@ -1080,7 +1082,7 @@ window.STARUP_ENGINE = (() => {
   }
 
   // ==================== MAP OVERLAYS (SMART DIFF — ZERO DROPPED MOBILE TAPS) ====================
-  function computeOverlaySig() {
+  function computeRoomOverlaySig() {
     const rSig = CFG.ROOMS.map(rc => {
       const rs = state.rooms[rc.id];
       const canBuy = !rs.unlocked && state.money >= rc.unlockCost ? 1 : 0;
@@ -1088,8 +1090,41 @@ window.STARUP_ENGINE = (() => {
       const jState = !rs.job ? '0' : (rs.job.ready ? 'R' : (rs.job.issue || 'W'));
       return `${rc.id}:${rs.unlocked?1:0}:${canBuy}:${down}:${rs.equipLv}:${jState}:${state.selectedRoom===rc.id?1:0}`;
     }).join('|');
-    const cSig = waitingClients.filter(c => c.arrived).map(c => `${c.id}:${c.tier}`).join(',');
-    return rSig + '#' + cSig + '#' + (state.tutorialStep === 1 ? 1 : 0) + '#' + (state.speed === 0 ? 1 : 0);
+    return rSig + '#' + (state.speed === 0 ? 1 : 0);
+  }
+
+  function computeClientOverlaySig() {
+    const cSig = waitingClients.filter(c => c.arrived).map(c => `${c.id}:${c.tier}:${c.slotX}:${c.slotY}`).join(',');
+    return cSig + '#' + (state.tutorialStep === 1 ? 1 : 0);
+  }
+
+  function ensureOverlayContainers(layer) {
+    if (!layer.dataset.clientDelegated) {
+      layer.dataset.clientDelegated = '1';
+      layer.addEventListener('click', (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest('[data-client-id]') : null;
+        if (!btn) return;
+        e.stopPropagation();
+        e.preventDefault();
+        openContractOfferModal(btn.dataset.clientId);
+      });
+    }
+    let roomsLayer = document.getElementById('mapRoomsOverlayLayer');
+    let clientsLayer = document.getElementById('mapClientsOverlayLayer');
+    if (!roomsLayer || !clientsLayer || !layer.contains(roomsLayer) || !layer.contains(clientsLayer)) {
+      layer.innerHTML = '';
+      roomsLayer = document.createElement('div');
+      roomsLayer.id = 'mapRoomsOverlayLayer';
+      roomsLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+      clientsLayer = document.createElement('div');
+      clientsLayer.id = 'mapClientsOverlayLayer';
+      clientsLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;';
+      layer.appendChild(roomsLayer);
+      layer.appendChild(clientsLayer);
+      lastRoomOverlaySig = '';
+      lastClientOverlaySig = '';
+    }
+    return { roomsLayer, clientsLayer };
   }
 
   function updateOverlayLiveMetrics() {
@@ -1118,14 +1153,20 @@ window.STARUP_ENGINE = (() => {
   }
 
   function renderMapOverlays(force = false) {
-    const sig = computeOverlaySig();
-    if (!force && sig === lastOverlaySig) {
+    const outerLayer = document.getElementById('mapOverlaysLayer');
+    if (!outerLayer) return;
+    const { roomsLayer: layer, clientsLayer } = ensureOverlayContainers(outerLayer);
+    const rSig = computeRoomOverlaySig();
+    const cSig = computeClientOverlaySig();
+    const roomsDirty = force || rSig !== lastRoomOverlaySig;
+    const clientsDirty = cSig !== lastClientOverlaySig;
+    if (!roomsDirty && !clientsDirty) {
       updateOverlayLiveMetrics();
       return;
     }
-    lastOverlaySig = sig;
-    const layer = document.getElementById('mapOverlaysLayer');
-    layer.innerHTML = '';
+    if (roomsDirty) {
+      lastRoomOverlaySig = rSig;
+      layer.innerHTML = '';
 
     CFG.ROOMS.forEach(rc => {
       const rs = state.rooms[rc.id];
@@ -1269,22 +1310,38 @@ window.STARUP_ENGINE = (() => {
       }
     });
 
-    // Render all arrived waiting clients at Reception
-    waitingClients.forEach(c => {
-      if (!c.arrived) return;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      const tierCls = c.tier === 'rush' ? 'action-rush' : (c.tier === 'mega' ? 'action-mega' : 'action-contract');
-      btn.className = 'action-bubble ' + tierCls;
-      btn.style.left = c.slotX + '%';
-      btn.style.top = c.slotY + '%';
-      const icon = c.tier === 'rush' ? '⚡' : (c.tier === 'mega' ? '🌟' : (c.isVIP ? '💎' : '📋'));
-      const timeTxt = state.tutorialStep === 1 ? 'Nhận!' : `${Math.ceil(c.patience)}s`;
-      const starLbl = `+${c.stars || (c.tier === "mega" ? 5 : (c.isVIP ? 3 : 2))}★`;
-      btn.innerHTML = `<span>${icon}</span><span>${FIN.fmtMoney(c.reward)} · ${starLbl} (<span id="cli-pat-${c.id}">${timeTxt}</span>)</span>`;
-      btn.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); openContractOfferModal(c.id); });
-      layer.appendChild(btn);
-    });
+    } // end if (roomsDirty)
+
+    // Render/diff arrived waiting clients at Reception (never destroyed when only room states change!)
+    if (clientsDirty) {
+      lastClientOverlaySig = cSig;
+      const arrived = waitingClients.filter(c => c.arrived);
+      const arrivedIds = new Set(arrived.map(c => c.id));
+      Array.from(clientsLayer.children).forEach(el => {
+        if (!arrivedIds.has(el.dataset.clientId)) el.remove();
+      });
+      arrived.forEach(c => {
+        let btn = clientsLayer.querySelector(`[data-client-id="${c.id}"]`);
+        const tierCls = c.tier === 'rush' ? 'action-rush' : (c.tier === 'mega' ? 'action-mega' : 'action-contract');
+        const icon = c.tier === 'rush' ? '⚡' : (c.tier === 'mega' ? '🌟' : (c.isVIP ? '💎' : '📋'));
+        const timeTxt = state.tutorialStep === 1 ? 'Nhận!' : `${Math.ceil(c.patience)}s`;
+        const starLbl = `+${c.stars || (c.tier === "mega" ? 5 : (c.isVIP ? 3 : 2))}★`;
+        if (!btn) {
+          btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.clientId = c.id;
+          btn.className = 'action-bubble ' + tierCls;
+          btn.style.left = c.slotX + '%';
+          btn.style.top = c.slotY + '%';
+          btn.innerHTML = `<span>${icon}</span><span>${FIN.fmtMoney(c.reward)} · ${starLbl} (<span id="cli-pat-${c.id}">${timeTxt}</span>)</span>`;
+          clientsLayer.appendChild(btn);
+        } else {
+          btn.style.left = c.slotX + '%';
+          btn.style.top = c.slotY + '%';
+        }
+      });
+    }
+    updateOverlayLiveMetrics();
   }
 
   function unlockRoom(rc) {
@@ -1783,7 +1840,18 @@ window.STARUP_ENGINE = (() => {
       state.savings.fixedDaysLeft = Math.max(0, state.savings.fixedDaysLeft - 1);
     }
 
-    const dividend = EMP.getBranchEffectiveStats(state, state.branchIdx).dividend;
+    let dividend = 0;
+    const branchDivItems = [];
+    const maxOpenBranch = Math.min(CFG.BRANCHES.length - 1, Math.max(state.branchIdx || 0, state.maxBranchIdx || 0));
+    for (let bi = 0; bi <= maxOpenBranch; bi++) {
+      const bEff = EMP.getBranchEffectiveStats(state, bi);
+      if (bEff.dividend > 0) {
+        dividend += bEff.dividend;
+        const shortName = bEff.branch.name.replace(/^[^:]+:\s*/, '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+        const lvTag = bEff.level > 1 ? ` Lv.${bEff.level}` : '';
+        branchDivItems.push(`${shortName}${lvTag} +${FIN.fmtMoney(bEff.dividend)}`);
+      }
+    }
     const prodIncome = EMP.getDailyProductIncome(state);
     const rivalDiv = EMP.getDailyRivalDividend(state);
     const passiveTotal = dividend + prodIncome + rivalDiv;
@@ -1816,7 +1884,7 @@ window.STARUP_ENGINE = (() => {
     openModal(`📊 Chốt Sổ Ngày ${state.day} — ${escapeHtml(state.companyName)}`, `
       <div style="background:#FAF6F0;border:0.12cqw solid #DFD2C1;border-radius:1.1cqw;padding:1cqw;display:flex;flex-direction:column;gap:0.5cqw;">
         <div style="display:flex;justify-content:space-between;"><span>Doanh thu chốt đơn hôm nay <em style="color:#7C6350;font-size:0.92em;">(đã cộng vào quỹ trong ngày)</em></span><strong style="color:#059669;">+${FIN.fmtMoney(state.dayRevenue)}</strong></div>
-        ${dividend > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Cổ tức Chi nhánh toàn cầu</span><strong style="color:#059669;">+${FIN.fmtMoney(dividend)}</strong></div>` : ''}
+        ${dividend > 0 ? `<div style="display:flex;justify-content:space-between;gap:0.8cqw;"><span>Cổ tức: ${branchDivItems.join(', ')}</span><strong style="color:#059669;white-space:nowrap;">+${FIN.fmtMoney(dividend)}</strong></div>` : ''}
         ${prodIncome > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🚀 Doanh thu Sản Phẩm riêng</span><strong style="color:#059669;">+${FIN.fmtMoney(prodIncome)}</strong></div>` : ''}
         ${rivalDiv > 0 ? `<div style="display:flex;justify-content:space-between;"><span>🏢 Cổ tức Thâu tóm M&A</span><strong style="color:#059669;">+${FIN.fmtMoney(rivalDiv)}</strong></div>` : ''}
         ${(flexInt + fixedInt) > 0 ? `<div style="display:flex;justify-content:space-between;"><span>Lãi tiết kiệm ngân hàng</span><strong style="color:#059669;">+${FIN.fmtMoney(flexInt + fixedInt)}</strong></div>` : ''}
@@ -2355,16 +2423,23 @@ window.STARUP_ENGINE = (() => {
     document.querySelectorAll('[data-expand-branch]').forEach(b => {
       b.onclick = () => {
         const idx = Number(b.dataset.expandBranch);
+        const br = CFG.BRANCHES[idx];
+        if (!br) return;
+        const cost = br.reqVal || 0;
+        if ((state.money || 0) < cost) {
+          AUD.playSFX('alert');
+          return showToast(`❌ Cần ${FIN.fmtMoney(cost)} tiền mặt để mở ${br.name}!`);
+        }
+        state.money -= cost;
         state.branchIdx = idx;
         state.maxBranchIdx = Math.max(state.maxBranchIdx || 0, idx);
         state.activeMapIdx = idx;
-        const br = CFG.BRANCHES[idx];
-        if (br && CFG.BRANCH_NEWS && Array.isArray(CFG.BRANCH_NEWS[br.id]) && CFG.BRANCH_NEWS[br.id].length) {
+        if (CFG.BRANCH_NEWS && Array.isArray(CFG.BRANCH_NEWS[br.id]) && CFG.BRANCH_NEWS[br.id].length) {
           addNews(`🌍 ${CFG.BRANCH_NEWS[br.id][0]}`);
         }
         applyBranchMap();
         AUD.playSFX('unlock'); autoSave(); renderHUD(); openIPOModal('ipo');
-        showToast(`${TICK_SVG}Đã chuyển trụ sở sang ${br.name}!`);
+        showToast(`${TICK_SVG}Đã mở ${br.name} (-${FIN.fmtMoney(cost)})!`);
       };
     });
     document.querySelectorAll('[data-switch-map]').forEach(b => {
@@ -2498,6 +2573,7 @@ window.STARUP_ENGINE = (() => {
             ${window.STARUP_PWA && window.STARUP_PWA.isStandalone() ? 'Đã cài App' : '📲 Cài làm App'}
           </button>
         </div>
+        <div style="margin-top:0.75cqw;text-align:center;font-size:0.94cqw;font-weight:700;color:#7C6350;">Phiên bản ${GAME_VERSION}</div>
       `;
     }
 
