@@ -7,7 +7,7 @@ window.STARUP_ENGINE = (() => {
   const EMP = window.STARUP_EMPIRE;
   const QST = window.STARUP_QUESTS;
   const PRS = window.STARUP_PRESTIGE;
-  const GAME_VERSION = '9.26.1';
+  const GAME_VERSION = '9.26.2';
 
   // Custom hand-crafted glossy emerald checkmark SVG harmonized with Starup's cream/wood palette
   const TICK_SVG = `<span class="starup-tick"><svg viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="12.5" fill="#059669" stroke="#FFFDF9" stroke-width="2.2"/><path d="M4.2 12.2A10.2 10.2 0 0 1 23.8 12.2A10.2 7 0 0 0 4.2 12.2Z" fill="#34D399" opacity="0.55"/><path d="M8.5 14.3L12.3 18.1L19.8 10.4" stroke="#FFFDF9" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`;

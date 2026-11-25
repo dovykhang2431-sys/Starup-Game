@@ -110,7 +110,7 @@ window.STARUP_EMPIRE = (() => {
             return `
               <div style="padding:0.85cqw 1cqw;border-radius:1.05cqw;border:0.12cqw solid ${lv > 0 ? '#86EFAC' : '#DFD2C1'};background:${lv > 0 ? '#F0FDF4' : '#FAF6F0'};display:flex;align-items:center;justify-content:space-between;gap:0.9cqw;">
                 <div>
-                  <div style="font-weight:900;color:#3D2B1F;">${p.icon} ${p.name} ${lv > 0 ? `<span style="padding:0.12cqw 0.55cqw;border-radius:999px;background:#059669;color:#fff;font-size:0.92cqw;">v${lv}.0</span>` : ''}</div>
+                  <div style="font-weight:900;color:#3D2B1F;">${p.icon} ${p.name} ${lv > 0 ? `<span style="padding:0.12cqw 0.55cqw;border-radius:999px;background:#059669;color:#fff;font-size:0.88cqw;">v${lv}.0</span>` : ''}</div>
                   <div style="font-size:1.02cqw;color:#6B5443;">${lv > 0 ? `Đang thu <strong style="color:#059669;">+${FIN.fmtMoney(curInc)}/ngày</strong> · Nâng cấp +50%` : `Thu thụ động <strong style="color:#059669;">+${FIN.fmtMoney(p.dailyIncome)}/ngày</strong> · Cần ${p.reqLabel}`}</div>
                 </div>
                 <button data-prod-act="${p.id}" type="button" ${disabled ? 'disabled' : ''} style="padding:0.58cqw 1cqw;border-radius:0.85cqw;background:${isMax ? '#F59E0B' : (disabled ? '#D6CCC0' : '#059669')};color:${isMax ? '#451A03' : (disabled ? '#6B5443' : '#fff')};font-weight:800;border:none;cursor:${disabled ? 'not-allowed' : 'pointer'};white-space:nowrap;">
@@ -199,25 +199,25 @@ window.STARUP_EMPIRE = (() => {
             return `
               <div style="padding:0.8cqw 1cqw;border-radius:1cqw;border:0.12cqw solid ${isCur ? '#10B981' : '#DFD2C1'};background:${isCur ? '#F0FDF4' : '#FAF6F0'};display:flex;align-items:center;justify-content:space-between;gap:0.8cqw;">
                 <div style="min-width:0;flex:1;">
-                  <div style="font-weight:800;color:#3D2B1F;display:flex;align-items:center;gap:0.45cqw;flex-wrap:wrap;">
+                  <div style="font-weight:900;font-size:1.18cqw;color:#3D2B1F;display:flex;align-items:center;gap:0.45cqw;flex-wrap:wrap;">
                     <span>${b.name}</span>
-                    ${unlocked && b.id !== 'hcm' ? `<span style="padding:0.1cqw 0.5cqw;border-radius:999px;background:${eff.level >= BRANCH_MAX_LV ? '#F59E0B' : '#059669'};color:${eff.level >= BRANCH_MAX_LV ? '#451A03' : '#fff'};font-size:0.86cqw;font-weight:900;">${eff.level >= BRANCH_MAX_LV ? `Lv.${eff.level}/5 · Tối đa` : `Lv.${eff.level}/5`}</span>` : ''}
+                    ${unlocked && b.id !== 'hcm' ? `<span style="padding:0.1cqw 0.5cqw;border-radius:999px;background:${eff.level >= BRANCH_MAX_LV ? '#F59E0B' : '#059669'};color:${eff.level >= BRANCH_MAX_LV ? '#451A03' : '#fff'};font-size:0.88cqw;font-weight:900;">${eff.level >= BRANCH_MAX_LV ? `Lv.${eff.level}/5 · Tối đa` : `Lv.${eff.level}/5`}</span>` : ''}
                   </div>
-                  <div style="font-size:1.0cqw;color:#6B5443;">${b.desc}</div>
-                  ${unlocked && b.id !== 'hcm' ? `<div style="font-size:0.94cqw;color:#047857;font-weight:800;margin-top:0.2cqw;">Hiệu dụng: x${eff.mult} giá hợp đồng · +${FIN.fmtMoney(eff.dividend)} cổ tức/ngày</div>` : ''}
-                  ${!unlocked && b.reqVal > 0 ? `<div style="font-size:0.94cqw;color:${nw >= b.reqVal ? '#059669' : '#B45309'};font-weight:800;margin-top:0.2cqw;">Tài sản ròng: ${FIN.fmtMoney(nw)} / ${FIN.fmtMoney(b.reqVal)}${!state.ipoDone ? ' · Cần IPO' : ''}</div>` : ''}
+                  <div style="font-size:1.02cqw;color:#6B5443;">${b.desc}</div>
+                  ${unlocked && b.id !== 'hcm' ? `<div style="font-size:0.95cqw;color:#047857;font-weight:800;margin-top:0.2cqw;">Hiệu dụng: x${eff.mult} giá hợp đồng · +${FIN.fmtMoney(eff.dividend)} cổ tức/ngày</div>` : ''}
+                  ${!unlocked && b.reqVal > 0 ? `<div style="font-size:0.95cqw;color:${nw >= b.reqVal ? '#059669' : '#B45309'};font-weight:800;margin-top:0.2cqw;">Tài sản ròng: ${FIN.fmtMoney(nw)} / ${FIN.fmtMoney(b.reqVal)}${!state.ipoDone ? ' · Cần IPO' : ''}</div>` : ''}
                 </div>
                 <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0.4cqw;flex-shrink:0;">
                   ${unlocked
                     ? (isCur
-                        ? `<span style="padding:0.35cqw 0.78cqw;border-radius:999px;background:#059669;color:#fff;font-weight:800;font-size:0.98cqw;white-space:nowrap;">Đang dùng mặt bằng</span>`
-                        : `<button data-switch-map="${idx}" type="button" style="padding:0.45cqw 0.85cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;">🏢 Chuyển mặt bằng</button>`)
-                    : `<button data-expand-branch="${idx}" type="button" ${canExp ? '' : 'disabled'} style="padding:0.52cqw 0.88cqw;border-radius:0.85cqw;background:${canExp ? '#D97706' : '#D6CCC0'};color:${canExp ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:${canExp ? 'pointer' : 'not-allowed'};white-space:nowrap;font-size:0.96cqw;">${canExp ? `🚀 Mở rộng · ${FIN.fmtMoney(b.reqVal)}` : branchLockLabel}</button>`
+                        ? `<span style="padding:0.35cqw 0.78cqw;border-radius:999px;background:#059669;color:#fff;font-weight:800;font-size:1.0cqw;white-space:nowrap;">Đang dùng mặt bằng</span>`
+                        : `<button data-switch-map="${idx}" type="button" style="padding:0.45cqw 0.85cqw;border-radius:0.8cqw;background:#4A3426;color:#FFFDF9;font-weight:800;border:none;cursor:pointer;white-space:nowrap;font-size:1.0cqw;">🏢 Chuyển mặt bằng</button>`)
+                    : `<button data-expand-branch="${idx}" type="button" ${canExp ? '' : 'disabled'} style="padding:0.52cqw 0.88cqw;border-radius:0.85cqw;background:${canExp ? '#D97706' : '#D6CCC0'};color:${canExp ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:${canExp ? 'pointer' : 'not-allowed'};white-space:nowrap;font-size:1.0cqw;">${canExp ? `🚀 Mở rộng · ${FIN.fmtMoney(b.reqVal)}` : branchLockLabel}</button>`
                   }
                   ${unlocked && b.id !== 'hcm'
                     ? (canUpgrade
-                        ? `<button data-upgrade-branch="${idx}" type="button" style="padding:0.42cqw 0.8cqw;border-radius:0.78cqw;background:${hasCashForUpgrade ? '#2563EB' : '#D6CCC0'};color:${hasCashForUpgrade ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:pointer;white-space:nowrap;font-size:0.92cqw;">⬆️ Nâng Lv.${eff.level + 1} · ${FIN.fmtMoney(eff.upgradeCost)}</button>`
-                        : `<span style="padding:0.28cqw 0.7cqw;border-radius:999px;background:#FEF3C7;border:0.1cqw solid #F59E0B;color:#92400E;font-weight:900;font-size:0.9cqw;white-space:nowrap;">★ Tối đa</span>`)
+                        ? `<button data-upgrade-branch="${idx}" type="button" style="padding:0.42cqw 0.8cqw;border-radius:0.78cqw;background:${hasCashForUpgrade ? '#2563EB' : '#D6CCC0'};color:${hasCashForUpgrade ? '#fff' : '#5C4636'};font-weight:800;border:none;cursor:pointer;white-space:nowrap;font-size:1.0cqw;">⬆️ Nâng Lv.${eff.level + 1} · ${FIN.fmtMoney(eff.upgradeCost)}</button>`
+                        : `<span style="padding:0.28cqw 0.7cqw;border-radius:999px;background:#FEF3C7;border:0.1cqw solid #F59E0B;color:#92400E;font-weight:900;font-size:0.88cqw;white-space:nowrap;">★ Tối đa</span>`)
                     : ''
                   }
                 </div>
